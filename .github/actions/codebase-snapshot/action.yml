@@ -1,0 +1,37 @@
+name: 'Codebase Snapshot Action'
+description: 'Checks branch patterns, creates a codebase snapshot zip, finds a Seal entity by PR#, uploads the zip to Seal, and links it to the entity.'
+author: 'Seal' 
+
+inputs:
+  seal_api_token:
+    description: 'Seal API Token'
+    required: true
+  seal_api_base_url:
+    description: 'Seal API Base URL (e.g., https://us.backend.seal.run/api/)'
+    required: true
+  seal_template_id:
+    description: 'Seal Template ID for the target change control entity'
+    required: true
+  seal_snapshot_field_name:
+     description: 'Name of the reference field in the Seal entity to link the snapshot'
+     required: false
+     default: 'Code Snapshot'
+  seal_file_type_title:
+     description: 'Title for the uploaded file type in Seal (e.g., "GitHub Artifacts")'
+     required: false
+     default: 'GitHub Artifacts'
+  exclude_patterns:
+    description: 'Space-separated glob patterns to exclude from the archive (e.g., ".git/* node_modules/*").'
+    required: false
+  archive_type:
+    description: 'The type of archive to create (supported: zip, tar).'
+    required: false
+    default: 'zip'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile' 
+
+branding:
+  icon: 'archive'
+  color: 'blue'

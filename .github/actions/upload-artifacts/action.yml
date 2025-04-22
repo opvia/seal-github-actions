@@ -1,0 +1,33 @@
+name: 'Upload Artifacts to Seal'
+description: 'Finds artifacts based on glob patterns, uploads them individually to Seal, finds a Seal entity by PR#, and links the uploaded files to the entity.'
+author: 'Seal'
+
+inputs:
+  seal_api_token:
+    description: 'Seal API Token'
+    required: true
+  seal_api_base_url:
+    description: 'Seal API Base URL (e.g., https://us.backend.seal.run/api/)'
+    required: true
+  seal_template_id:
+    description: 'Seal Template ID for the target change control entity'
+    required: true
+  seal_field_name:
+     description: 'Name of the reference field in the Seal entity to link the artifacts'
+     required: false
+     default: 'Release Artifact(s)' 
+  seal_file_type_title:
+     description: 'Title for the uploaded file type in Seal (e.g., "GitHub Artifacts")'
+     required: false
+     default: 'GitHub-Artifacts'
+  artifact_patterns:
+    description: 'Space-separated glob patterns matching the artifacts to upload (e.g., "test-results/*.xml" "build/*.log"). Required.'
+    required: true 
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+
+branding:
+  icon: 'upload-cloud' 
+  color: 'green'      

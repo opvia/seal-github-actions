@@ -1,0 +1,49 @@
+name: Upload Test Artifacts to Seal on PR
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read        
+  pull-requests: read  
+  packages: read       
+
+jobs:
+  test_and_upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Create Dummy Artifacts (Replace with actual test execution)
+      - name: Create dummy artifact files
+        run: |
+          echo "Creating dummy artifact files for testing upload..."
+          mkdir -p test-results coverage
+          echo '<testsuite tests="1"><testcase classname="dummy" name="test_example"/></testsuite>' > test-results/dummy_results.xml
+          echo 'SF:dummy.py\nDA:1,1\nLF:1\nLH:1\nend_of_record' > coverage/dummy_coverage.lcov
+          echo '<?xml version="1.0" ?><coverage><sources><source>.</source></sources><packages><package name="." line-rate="1.0"><classes><class name="dummy.py" filename="dummy.py" line-rate="1.0"><lines><line number="1" hits="1"/></lines></class></classes></package></packages></coverage>' > coverage/dummy_coverage.xml
+          ls -R test-results coverage # List created files for verification
+          echo "Dummy files created."
+
+      # Step 3: Run the upload-artifacts action
+      - name: Upload Test Artifacts to Seal
+        uses: docker://ghcr.io/opvia/upload-artifacts-action:latest 
+        with:
+          seal_api_token: ${{ secrets.SEAL_API_TOKEN }}
+          seal_api_base_url: 'https://us.backend.seal.run/api/'
+          seal_template_id: '3eecf18f-da15-429c-968a-df43ba85c970'
+          seal_field_name: 'Test Artifact(s)'
+          seal_file_type_title: 'GitHub-Artifacts' 
+
+          artifact_patterns: '"./test-results/*.xml" "./coverage/*.lcov" "./coverage/*.xml"'
+
+      - name: Upload Complete
+        if: always()
+        run: echo "Test artifact upload step finished."

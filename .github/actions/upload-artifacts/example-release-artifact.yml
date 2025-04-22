@@ -1,0 +1,43 @@
+name: Upload Release Artifacts to Seal
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read       
+  pull-requests: read  
+  packages: read       
+
+jobs:
+  upload_readme_files:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the code at the release tag
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # Step 2: Run the upload-artifacts action
+      - name: Upload README files to Seal
+        uses: docker://ghcr.io/opvia/upload-artifacts-action:latest
+        with:
+          seal_api_token: ${{ secrets.SEAL_API_TOKEN }}
+          seal_api_base_url: 'https://us.backend.seal.run/api/'
+
+          seal_template_id: '3eecf18f-da15-429c-968a-df43ba85c970'
+          seal_field_name: 'Release Artifact(s)'
+
+          seal_file_type_title: 'GitHub-Artifacts' 
+
+          # Find all README files in the repository
+          artifact_patterns: '"*/README.md"' 
+
+      - name: Upload Complete
+        if: success()
+        run: echo "Release artifact upload attempted."

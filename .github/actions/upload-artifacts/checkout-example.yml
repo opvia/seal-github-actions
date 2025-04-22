@@ -1,0 +1,67 @@
+name: Upload Release Artifacts via Checkout
+
+on:
+  pull_request: # Trigger matches entrypoint.sh expectations
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read        # Needed for both checkouts
+  pull-requests: read  # Needed for entrypoint.sh PR context
+
+jobs:
+  upload_via_checkout:
+    runs-on: ubuntu-latest # Assumes Ubuntu runner for apt-get
+
+    steps:
+      # Step 1: Checkout the main repository (containing workflow and files like README.md)
+      - name: Checkout Main Repo
+        uses: actions/checkout@v4
+
+      # Step 2: Checkout the action's source code into a specific path
+      - name: Checkout upload-artifacts Action Code
+        uses: actions/checkout@v4
+        with:
+          # Replace with the actual repository where your actions live
+          repository: opvia/change-order-github-app
+          # Checkout into a subdirectory to avoid conflicts
+          path: ./action-src/upload-artifacts
+          # Optional: Pin to a specific tag or commit SHA for stability
+          ref: v1.0.0
+
+      # Step 3: Install dependencies required by entrypoint.sh (mimic Dockerfile)
+      - name: Install Action Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            curl \
+            jq \
+            ca-certificates
+        shell: bash
+
+      # Step 4: Execute the entrypoint script directly
+      - name: Run Upload Artifacts Script
+        # Run the script from the location it was checked out to
+        run: ./action-src/upload-artifacts/entrypoint.sh
+        shell: bash
+        env:
+          # --- Manually Set INPUT_* Environment Variables ---
+          # Map secrets/values to the env vars the script expects
+
+          # Required Inputs (values from example-release-artifact.yml)
+          INPUT_SEAL_API_TOKEN: ${{ secrets.SEAL_API_TOKEN }}
+          INPUT_SEAL_API_BASE_URL: 'https://us.backend.seal.run/api/'
+          INPUT_SEAL_TEMPLATE_ID: '3eecf18f-da15-429c-968a-df43ba85c970'
+          INPUT_ARTIFACT_PATTERNS: '"*/README.md"' # Pattern for recursive READMEs
+
+          # Optional Inputs (values from example-release-artifact.yml)
+          INPUT_SEAL_FIELD_NAME: 'Release Artifact(s)'
+          INPUT_SEAL_FILE_TYPE_TITLE: 'GitHub-Artifacts'
+
+          # Note: GITHUB_* environment variables needed by the script (like GITHUB_EVENT_PATH)
+          # are automatically provided by the GitHub Actions runner environment to 'run' steps.
+
+      - name: Upload Complete Check
+        if: success() # Check if the script execution step succeeded
+        run: echo "Upload artifacts script finished attempt."
