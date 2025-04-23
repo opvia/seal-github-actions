@@ -43,11 +43,13 @@ async function run(): Promise<void> {
         }
 		core.info(`Searching for patterns: ${patterns.join(', ')} in ${prContext.workspace}`);
 
-		const globber = await glob.create(patterns.join('\n'), {
-            followSymbolicLinks: false, // Match behavior of default find
-            implicitDescendants: true,
-            matchDirectories: false, // We only want files
-         });
+		const globOptions = {
+			followSymbolicLinks: false, // Match behavior of default find
+			implicitDescendants: true,
+			matchDirectories: false, // We only want files
+			cwd: prContext.workspace // <-- Explicitly set the CWD for glob
+		};
+		const globber = await glob.create(patterns.join('\n'), globOptions);
 		const foundFiles: string[] = await globber.glob(); // Returns absolute paths
 
 		if (foundFiles.length === 0) {
