@@ -53,4 +53,35 @@ This action finds specific files (artifacts) within the repository based on patt
 
 ## Usage
 
-These actions are intended to be called from workflow files (`.github/workflows/`) in other repositories that need to integrate with Seal. Refer to the respective `action.yml` files within each action's directory for detailed input parameters and defaults.
+These actions run as self-contained Docker containers executing Node.js and are intended to be called from workflow files (`.github/workflows/`) in other repositories that need to integrate with Seal.
+
+To use an action, reference its published Docker image on GitHub Container Registry (GHCR). Refer to the respective `action.yml` files within each action's directory for detailed input parameters and defaults.
+
+**Example (`upload-artifacts`):**
+
+```yaml
+jobs:
+  upload_files:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read        # To checkout code
+      pull-requests: read # To read PR context
+      packages: read      # To pull image from GHCR
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Add steps here to generate artifacts if needed
+
+      - name: Upload Artifacts to Seal
+        # Replace 'main' with a specific version tag (e.g., v2.0.0) once released
+        uses: docker://ghcr.io/opvia/upload-artifacts-action:main
+        with:
+          seal_api_token: ${{ secrets.SEAL_API_TOKEN }}
+          seal_api_base_url: 'https://your-seal-instance.com/api/' # Your Seal API URL
+          seal_template_id: 'your-template-uuid' # Template ID for the entity to link to
+          artifact_patterns: '"./path/to/artifacts/*.xml" "./another/path/*.log"'
+          # Optional inputs:
+          # seal_field_name: 'Linked Artifacts'
+          # seal_file_type_title: 'CI Artifacts'
+```
