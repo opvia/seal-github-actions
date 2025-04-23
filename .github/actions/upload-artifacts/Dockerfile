@@ -1,22 +1,30 @@
 # .github/actions/upload-artifacts/Dockerfile
-FROM ubuntu:22.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    jq \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM node:20-slim
 
-COPY entrypoint.sh /entrypoint.sh
+WORKDIR /app
 
-RUN chmod +x /entrypoint.sh
+# Copy package files from the actions root directory
+COPY ../package.json ./
+COPY ../package-lock.json ./
 
-LABEL org.opencontainers.image.source=https://github.com/opvia/change-order-github-app
+RUN npm ci
+
+# Copy tsconfig from the actions root directory
+COPY ../tsconfig.json ./
+
+# Copy shared common code from the actions root directory
+COPY ../common ./common
+# Copy this action's specific source code from the build context
+COPY ./src ./upload-artifacts/src
+
+RUN npm run build:artifacts
+
+LABEL org.opencontainers.image.source=https://github.com/opvia/seal-github-actions
 LABEL org.opencontainers.image.description="Finds artifacts based on patterns, uploads them to Seal, and links them to a Seal entity."
-
-LABEL repository="https://github.com/opvia/change-order-github-app"
-LABEL homepage="https://github.com/opvia/change-order-github-app"
-
+LABEL repository="https://github.com/opvia/seal-github-actions"
+LABEL homepage="https://github.com/opvia/seal-github-actions"
 LABEL maintainer="Seal <support@seal.run>"
 
-ENTRYPOINT ["/entrypoint.sh"]
+# Entrypoint uses the output path defined in the build script
+ENTRYPOINT ["node", "/app/upload-artifacts/dist/index.js"]

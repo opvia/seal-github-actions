@@ -1,0 +1,46 @@
+{
+  "name": "seal-github-actions",
+  "version": "1.0.0",
+  "description": "Node.js based GitHub Actions for Seal integration",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf codebase-snapshot/dist upload-artifacts/dist",
+    "build:snapshot": "ncc build codebase-snapshot/src/index.ts -o codebase-snapshot/dist --source-map --license licenses.txt",
+    "build:artifacts": "ncc build upload-artifacts/src/index.ts -o upload-artifacts/dist --source-map --license licenses.txt",
+    "build": "npm run clean && npm run build:snapshot && npm run build:artifacts",
+    "test": "jest",
+    "all": "npm run build && npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/opvia/seal-github-actions.git"
+  },
+  "keywords": [
+    "GitHub",
+    "Actions",
+    "TypeScript",
+    "Seal"
+  ],
+  "author": "Seal",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/opvia/seal-github-actions/issues"
+  },
+  "homepage": "https://github.com/opvia/seal-github-actions#readme",
+  "devDependencies": {
+    "@actions/exec": "^1.1.1",
+    "@actions/github": "^6.0.0",
+    "@types/axios": "^0.14.4",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.14.1",
+    "@vercel/ncc": "^0.38.3",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/glob": "^0.5.0"
+  }
+}

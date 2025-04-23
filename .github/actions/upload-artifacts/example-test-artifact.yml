@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout code
+      # Step 1: Checkout code (of the repo using the action)
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -32,7 +32,7 @@ jobs:
           ls -R test-results coverage # List created files for verification
           echo "Dummy files created."
 
-      # Step 3: Run the upload-artifacts action
+      # Step 3: Run the published upload-artifacts Docker action
       - name: Upload Test Artifacts to Seal
         uses: docker://ghcr.io/opvia/upload-artifacts-action:latest 
         with:
@@ -40,8 +40,8 @@ jobs:
           seal_api_base_url: 'https://us.backend.seal.run/api/'
           seal_template_id: '3eecf18f-da15-429c-968a-df43ba85c970'
           seal_field_name: 'Test Artifact(s)'
-          seal_file_type_title: 'GitHub-Artifacts' 
-
+          seal_file_type_title: 'GitHub-Artifacts'
+          
           artifact_patterns: '"./test-results/*.xml" "./coverage/*.lcov" "./coverage/*.xml"'
 
       - name: Upload Complete
