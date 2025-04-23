@@ -1,0 +1,59 @@
+name: Upload Release Artifacts via Checkout
+
+on:
+  pull_request: 
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read       
+  pull-requests: read  
+
+jobs:
+  codebase_snapshot_via_checkout:
+    runs-on: ubuntu-latest # replace with any runner
+
+    steps:
+      # Step 1: Checkout the main repository 
+      - name: Checkout Main Repo
+        uses: actions/checkout@v4
+
+      # Step 2: Checkout the action's source code into a specific path
+      - name: Checkout Codebase Snapshot Action Code
+        uses: actions/checkout@v4
+        with:
+          repository: opvia/seal-github-actions 
+          # Checkout into a subdirectory to avoid conflicts
+          path: ./action-src/codebase-snapshot
+          # Optional: Pin to a specific tag or commit SHA 
+          ref: v1.0.0
+
+      # Step 3: Install dependencies required by entrypoint.sh 
+      - name: Install Action Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            zip \
+            curl \
+            jq \
+            ca-certificates
+        shell: bash
+
+      # Step 4: Execute the entrypoint script directly
+      - name: Run Codebase Snapshot Script
+        run: ./action-src/codebase-snapshot/entrypoint.sh
+        shell: bash
+        env:
+          INPUT_SEAL_API_TOKEN: ${{ secrets.SEAL_API_TOKEN }}
+          INPUT_SEAL_API_BASE_URL: 'https://us.backend.seal.run/api/' 
+          INPUT_SEAL_TEMPLATE_ID: '3eecf18f-da15-429c-968a-df43ba85c970' 
+
+          INPUT_SEAL_SNAPSHOT_FIELD_NAME: 'Code Snapshot'
+          INPUT_SEAL_FILE_TYPE_TITLE: 'GitHub-Artifacts'
+          INPUT_EXCLUDE_PATTERNS: '.git/*' 
+          INPUT_ARCHIVE_TYPE: 'zip' 
+
+      - name: Upload Complete Check
+        if: success() 
+        run: echo "Codebase snapshot script finished attempt."
