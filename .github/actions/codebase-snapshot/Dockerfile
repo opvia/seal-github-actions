@@ -1,26 +1,28 @@
 # .github/actions/codebase-snapshot/Dockerfile
-# Use a base image with necessary tools or install them
-FROM ubuntu:22.04
+
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY ../package.json ./
+COPY ../package-lock.json ./
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
     zip \
-    curl \
-    jq \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    tar \
+    && npm ci \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY ../tsconfig.json ./
+COPY ../common ./common
+COPY ./src ./codebase-snapshot/src
 
-# [IMPORTANT] Add OCI labels to link the package to the source repository
-# Replace with your actual repository URL
-LABEL org.opencontainers.image.source=https://github.com/opvia/change-order-github-app
-LABEL org.opencontainers.image.description="Creates a codebase snapshot and uploads to Seal."
+RUN npm run build:snapshot
 
-LABEL repository="https://github.com/opvia/change-order-github-app"
-LABEL homepage="https://github.com/opvia/change-order-github-app"
-
+LABEL org.opencontainers.image.source=https://github.com/opvia/seal-github-actions
+LABEL org.opencontainers.image.description="Creates a codebase snapshot archive and uploads to Seal."
+LABEL repository="https://github.com/opvia/seal-github-actions"
+LABEL homepage="https://github.com/opvia/seal-github-actions"
 LABEL maintainer="Seal <support@seal.run>"
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["node", "/app/codebase-snapshot/dist/index.js"]

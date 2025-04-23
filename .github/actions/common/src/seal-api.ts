@@ -160,7 +160,11 @@ export async function findSealEntityId(
 		);
 	}
 
-	const entityId = matchingEntities[0].id;
+	const entityId = matchingEntities[0]?.id;
+	if (!entityId) {
+		core.error(`[${functionName}] Found unique Seal entity ID: ${entityId}`);
+		throw new Error(`Found unique Seal entity ID: ${entityId}`);
+	}
 	core.info(`[${functionName}] Found unique Seal entity ID: ${entityId}`);
 	return entityId;
 }

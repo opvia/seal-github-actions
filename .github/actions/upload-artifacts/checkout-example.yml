@@ -28,7 +28,7 @@ jobs:
           # Checkout into a subdirectory to avoid conflicts
           path: ./action-src/upload-artifacts
           # Optional: Pin to a specific tag or commit SHA
-          ref: v1.0.0
+          # ref: v1.0.0
 
       # Step 3: Setup Node.js environment (required by the TS action)
       - name: Setup Node.js

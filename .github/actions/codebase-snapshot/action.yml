@@ -1,5 +1,5 @@
 name: 'Codebase Snapshot Action'
-description: 'Checks branch patterns, creates a codebase snapshot zip, finds a Seal entity by PR#, uploads the zip to Seal, and links it to the entity.'
+description: 'Creates a codebase snapshot archive, finds a Seal entity by PR#, uploads the archive to Seal, and links it to the entity.'
 author: 'Seal' 
 
 inputs:
@@ -29,8 +29,8 @@ inputs:
     default: 'zip'
 
 runs:
-  using: 'docker'
-  image: 'Dockerfile' 
+  using: 'node20'
+  main: 'dist/index.js'
 
 branding:
   icon: 'archive'
