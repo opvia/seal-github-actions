@@ -44289,11 +44289,13 @@ async function run() {
             return; // Exit gracefully if no patterns
         }
         lib_core.info(`Searching for patterns: ${patterns.join(', ')} in ${prContext.workspace}`);
-        const globber = await glob.create(patterns.join('\n'), {
+        const globOptions = {
             followSymbolicLinks: false, // Match behavior of default find
             implicitDescendants: true,
             matchDirectories: false, // We only want files
-        });
+            cwd: prContext.workspace // <-- Explicitly set the CWD for glob
+        };
+        const globber = await glob.create(patterns.join('\n'), globOptions);
         const foundFiles = await globber.glob(); // Returns absolute paths
         if (foundFiles.length === 0) {
             lib_core.info('No artifact files found matching the specified patterns. Nothing to upload.');
