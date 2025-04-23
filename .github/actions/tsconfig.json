@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    /* Base Options: */
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    /* Strictness */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitAny": true,
+    "noImplicitOverride": true,
+
+    "module": "NodeNext",
+
+    "rootDir": ".",
+
+    /* Module Resolution */
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "@common/*": ["common/src/*"]
+    },
+
+    /* Build Process */
+    "incremental": true
+  },
+  "include": ["common/src/**/*.ts", "codebase-snapshot/src/**/*.ts", "upload-artifacts/src/**/*.ts", "**/*.test.ts"],
+  "exclude": ["node_modules", "**/dist"]
+} 

@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest # replace with any runner
 
     steps:
-      # Step 1: Checkout the main repository 
+      # Step 1: Checkout the main repository
       - name: Checkout Main Repo
         uses: actions/checkout@v4
 
@@ -28,20 +28,18 @@ jobs:
           # Checkout into a subdirectory to avoid conflicts
           path: ./action-src/upload-artifacts
           # Optional: Pin to a specific tag or commit SHA
-          ref: v1.0.0
+          # ref: v1.0.0
 
-      # Step 3: Install dependencies required by entrypoint.sh 
-      - name: Install Action Dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            curl \
-            jq \
-            ca-certificates
-        shell: bash
+      # Step 3: Setup Node.js environment (required by the TS action)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Match the version used by the action
 
-      # Step 4: Execute the entrypoint script directly
-      - name: Run Upload Artifacts Script
-        run: ./action-src/upload-artifacts/entrypoint.sh
+      # Step 4: Execute the compiled entrypoint script directly using node
+      # IMPORTANT: Assumes the 'dist/index.js' file exists in the checked-out action code.
+      - name: Run Upload Artifacts Script 
+        run: node ./action-src/upload-artifacts/dist/index.js
         shell: bash
         env:
           INPUT_SEAL_API_TOKEN: ${{ secrets.SEAL_API_TOKEN }}
@@ -50,8 +48,8 @@ jobs:
 
           INPUT_SEAL_FIELD_NAME: 'Release Artifact(s)'
           INPUT_SEAL_FILE_TYPE_TITLE: 'GitHub-Artifacts'
-          INPUT_ARTIFACT_PATTERNS: '"*/README.md"' 
+          INPUT_ARTIFACT_PATTERNS: '"*/README.md"' # Example patterns
 
       - name: Upload Complete Check
-        if: success() 
+        if: always() 
         run: echo "Upload artifacts script finished attempt."

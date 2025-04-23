@@ -1,0 +1,4 @@
+.github/actions/node_modules/
+.github/actions/.env*
+.github/actions/coverage/
+.github/actions/licenses.txt
