@@ -73,15 +73,14 @@ async function run(): Promise<void> {
 
 		// --- Step 3: Upload Artifacts & Collect IDs/Versions ---
 		core.startGroup('Uploading Artifacts');
+        const timestamp = new Date().valueOf();
 		const uploadedFileRefs: SealFileReference[] = [];
 		let uploadFailedCount = 0;
-		let uploadCounter = 0;
 
 		for (const filePath of foundFiles) {
-            uploadCounter++;
 			const originalFilename = path.basename(filePath);
-			// Construct unique filename for Seal
-			const sealFilename = `artifact-${originalFilename}-pr${prContext.prNumber}-index${uploadCounter}`;
+			// Construct unique filename for Seal using timestamp
+			const sealFilename = `artifact-${originalFilename}-PR${prContext.prNumber}-${timestamp}`;
 			core.info(`Attempting upload for: ${path.relative(prContext.workspace, filePath)} as ${sealFilename}`);
 
 			try {

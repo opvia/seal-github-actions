@@ -20,14 +20,37 @@ jobs:
       - name: Checkout Main Repo
         uses: actions/checkout@v4
 
-      # Step 2: Checkout the action's source code into a specific path
-      - name: Checkout Codebase Snapshot Action Code
+      # Step 2a: Checkout the action's repo into a temporary location
+      - name: Checkout Action Repo (Temp)
         uses: actions/checkout@v4
         with:
-          repository: opvia/seal-github-actions 
-          path: ./action-src/codebase-snapshot
-          # Optional: Pin to a specific tag or commit SHA 
-          # ref: v1.0.0
+          repository: opvia/seal-github-actions # Public repo
+          path: ./temp-action-repo             # Temporary checkout path
+          ref: main                            # Or specific ref containing dist
+          fetch-depth: 0                       # Fetch all history
+
+      # Step 2b: Manually copy the required action contents
+      - name: Copy Action Files
+        run: |
+          ACTION_SOURCE_DIR="./temp-action-repo/.github/actions/codebase-snapshot"
+          ACTION_TARGET_DIR="./action-src/codebase-snapshot"
+          echo "Copying contents from ${ACTION_SOURCE_DIR} to ${ACTION_TARGET_DIR}"
+          # Check if source directory exists before copying
+          if [ ! -d "${ACTION_SOURCE_DIR}" ]; then
+            echo "ERROR: Source directory ${ACTION_SOURCE_DIR} does not exist!"
+            exit 1
+          fi
+          mkdir -p "${ACTION_TARGET_DIR}"
+          # Use 'cp -a' to preserve attributes and copy recursively, '.' copies contents
+          cp -a "${ACTION_SOURCE_DIR}/." "${ACTION_TARGET_DIR}/"
+          echo "Copy complete."
+        shell: bash
+
+      # Step 2c: (Optional) Clean up temporary checkout
+      - name: Clean up temp checkout
+        if: always() # Run even if subsequent steps fail
+        run: rm -rf ./temp-action-repo
+        shell: bash
 
       # Step 3: Install runtime dependencies 
       - name: Install Runtime Dependencies
