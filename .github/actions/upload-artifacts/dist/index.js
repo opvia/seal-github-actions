@@ -44311,14 +44311,13 @@ async function run() {
         lib_core.endGroup();
         // --- Step 3: Upload Artifacts & Collect IDs/Versions ---
         lib_core.startGroup('Uploading Artifacts');
+        const timestamp = new Date().valueOf();
         const uploadedFileRefs = [];
         let uploadFailedCount = 0;
-        let uploadCounter = 0;
         for (const filePath of foundFiles) {
-            uploadCounter++;
             const originalFilename = external_node_path_default().basename(filePath);
-            // Construct unique filename for Seal
-            const sealFilename = `artifact-${originalFilename}-pr${prContext.prNumber}-index${uploadCounter}`;
+            // Construct unique filename for Seal using timestamp
+            const sealFilename = `artifact-${originalFilename}-PR${prContext.prNumber}-${timestamp}`;
             lib_core.info(`Attempting upload for: ${external_node_path_default().relative(prContext.workspace, filePath)} as ${sealFilename}`);
             try {
                 const fileId = await uploadSealFile(inputs.sealApiBaseUrl, inputs.sealApiToken, filePath, // Pass absolute path
