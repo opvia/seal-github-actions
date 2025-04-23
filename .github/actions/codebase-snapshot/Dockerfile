@@ -4,18 +4,17 @@ FROM node:20-slim
 
 WORKDIR /app
 
-COPY ../package.json ./
-COPY ../package-lock.json ./
+COPY package.json ./
+COPY package-lock.json ./
+COPY tsconfig.json ./
+COPY common ./common
+COPY codebase-snapshot/src ./codebase-snapshot/src
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     tar \
     && npm ci \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-COPY ../tsconfig.json ./
-COPY ../common ./common
-COPY ./src ./codebase-snapshot/src
 
 RUN npm run build:snapshot
 

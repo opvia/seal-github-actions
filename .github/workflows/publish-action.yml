@@ -56,7 +56,8 @@ jobs:
       - name: Build and push ${{ matrix.action_name }} Docker image (Multi-Arch)
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.action_path }}
+          context: .github/actions/
+          file: ./${{ matrix.action_path }}/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
