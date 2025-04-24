@@ -1,4 +1,4 @@
-name: Upload Release Artifacts to Seal on PR (Checkout)
+name: Upload Release Artifacts via Uses Syntax
 
 on:
   pull_request: 
@@ -12,68 +12,19 @@ permissions:
   pull-requests: read  
 
 jobs:
-  upload_via_checkout:
-    runs-on: ubuntu-latest # replace with any runner
+  upload_via_uses:
+    runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the main repository
       - name: Checkout Main Repo
         uses: actions/checkout@v4
 
-      # Step 2a: Checkout the action's repo using sparse checkout
-      - name: Checkout Action Repo (Temp)
-        uses: actions/checkout@v4
+      - name: Upload Artifacts to Seal
+        uses: opvia/seal-github-actions/.github/actions/upload-artifacts@main
         with:
-          repository: opvia/seal-github-actions
-          path: ./temp-action-repo             # Still check out into a temp path
-          ref: main
-          fetch-depth: 1                       # Optional: Use 1 for efficiency if full history isn't needed
-          sparse-checkout: |                   # Define sparse checkout patterns
-            .github/actions/upload-artifacts
-
-      # Step 2b: Manually copy the required action contents
-      - name: Copy Action Files
-        run: |
-          ACTION_SOURCE_DIR="./temp-action-repo/.github/actions/upload-artifacts"
-          ACTION_TARGET_DIR="./action-src/upload-artifacts"
-          echo "Copying contents from ${ACTION_SOURCE_DIR} to ${ACTION_TARGET_DIR}"
-          # Check if source directory exists before copying
-          if [ ! -d "${ACTION_SOURCE_DIR}" ]; then
-            echo "ERROR: Source directory ${ACTION_SOURCE_DIR} does not exist!"
-            exit 1
-          fi
-          mkdir -p "${ACTION_TARGET_DIR}"
-          # Use 'cp -a' to preserve attributes and copy recursively, '.' copies contents
-          cp -a "${ACTION_SOURCE_DIR}/." "${ACTION_TARGET_DIR}/"
-          echo "Copy complete."
-        shell: bash
-
-      # Step 2c: (Optional) Clean up temporary checkout
-      - name: Clean up temp checkout
-        if: always() # Run even if subsequent steps fail
-        run: rm -rf ./temp-action-repo
-        shell: bash
-
-      # Step 3: Setup Node.js environment
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # Step 4: Execute the compiled entrypoint script directly using node
-      - name: Run Upload Artifacts Script
-        run: node ./action-src/upload-artifacts/dist/index.js
-        shell: bash
-        env:
-          INPUT_SEAL_API_TOKEN: 'seal_c10f400a4074d0919fff056aabf6cec6da53aef6293a6322e3d8f824f4ae0fb6b4c06b73b1982cb51f164b46802ce220375ae6638e283b40f05ceb46622c5e7012700b3a'
-          INPUT_SEAL_API_BASE_URL: 'https://us.backend.seal.run/api/'
-          INPUT_SEAL_TEMPLATE_ID: '3eecf18f-da15-429c-968a-df43ba85c970'
-
-          INPUT_SEAL_FIELD_NAME: 'Release Artifact(s)'
-          INPUT_SEAL_FILE_TYPE_TITLE: 'GitHub-Artifacts'
-          INPUT_ARTIFACT_PATTERNS: '**/README.md' # Example patterns
-
-      # Step 5: Upload Complete Check
-      - name: Upload Complete Check
-        if: always()
-        run: echo "Upload artifacts script finished attempt."
+          seal_api_token: ${{ secrets.SEAL_API_TOKEN }}
+          seal_api_base_url: 'https://us.backend.seal.run/api/'
+          seal_template_id: '3eecf18f-da15-429c-968a-df43ba85c970'
+          seal_field_name: 'Release Artifact(s)'
+          seal_file_type_title: 'GitHub-Artifacts'
+          artifact_patterns: '"*/README.md"'
