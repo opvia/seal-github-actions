@@ -1,4 +1,4 @@
-name: Upload Release Artifacts via Checkout
+name: Codebase Snapshot via Uses 
 
 on:
   pull_request:
@@ -12,73 +12,24 @@ permissions:
   pull-requests: read
 
 jobs:
-  codebase_snapshot_via_checkout:
-    runs-on: ubuntu-latest # replace with any runner
+  codebase_snapshot_via_uses:
+    runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the main repository
       - name: Checkout Main Repo
         uses: actions/checkout@v4
 
-      # Step 2a: Checkout the action's repo into a temporary location
-      - name: Checkout Action Repo (Temp)
-        uses: actions/checkout@v4
+      - name: Run Codebase Snapshot Action
+        uses: opvia/seal-github-actions/.github/actions/codebase-snapshot@main
         with:
-          repository: opvia/seal-github-actions # Public repo
-          path: ./temp-action-repo             # Temporary checkout path
-          ref: main                            # Or specific ref containing dist
-          fetch-depth: 0                       # Fetch all history
-
-      # Step 2b: Manually copy the required action contents
-      - name: Copy Action Files
-        run: |
-          ACTION_SOURCE_DIR="./temp-action-repo/.github/actions/codebase-snapshot"
-          ACTION_TARGET_DIR="./action-src/codebase-snapshot"
-          echo "Copying contents from ${ACTION_SOURCE_DIR} to ${ACTION_TARGET_DIR}"
-          # Check if source directory exists before copying
-          if [ ! -d "${ACTION_SOURCE_DIR}" ]; then
-            echo "ERROR: Source directory ${ACTION_SOURCE_DIR} does not exist!"
-            exit 1
-          fi
-          mkdir -p "${ACTION_TARGET_DIR}"
-          # Use 'cp -a' to preserve attributes and copy recursively, '.' copies contents
-          cp -a "${ACTION_SOURCE_DIR}/." "${ACTION_TARGET_DIR}/"
-          echo "Copy complete."
-        shell: bash
-
-      # Step 2c: (Optional) Clean up temporary checkout
-      - name: Clean up temp checkout
-        if: always() # Run even if subsequent steps fail
-        run: rm -rf ./temp-action-repo
-        shell: bash
-
-      # Step 3: Install runtime dependencies 
-      - name: Install Runtime Dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            zip \
-            tar
-        shell: bash
-
-      # Step 4: Setup Node.js environment (required by the TS action)
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20' # Match the version used by the action
-
-      # Step 5: Execute the compiled entrypoint script directly using node
-      - name: Run Codebase Snapshot Script (Node.js)
-        run: node ./action-src/codebase-snapshot/dist/index.js
-        shell: bash
-        env:
-          INPUT_SEAL_API_TOKEN: ${{ secrets.SEAL_API_TOKEN }}
-          INPUT_SEAL_API_BASE_URL: 'https://us.backend.seal.run/api/'
-          INPUT_SEAL_TEMPLATE_ID: '3eecf18f-da15-429c-968a-df43ba85c970'
-          INPUT_SEAL_SNAPSHOT_FIELD_NAME: 'Code Snapshot'
-          INPUT_SEAL_FILE_TYPE_TITLE: 'GitHub-Artifacts'
-          INPUT_EXCLUDE_PATTERNS: '.git/*' 
-          INPUT_ARCHIVE_TYPE: 'zip' 
+          seal_api_token: ${{ secrets.SEAL_API_TOKEN }}
+          seal_api_base_url: 'https://us.backend.seal.run/api/'
+          seal_template_id: '3eecf18f-da15-429c-968a-df43ba85c970'
+          seal_snapshot_field_name: 'Code Snapshot'
+          seal_file_type_title: 'GitHub-Artifacts'
+          exclude_patterns: '.git/*'
+          archive_type: 'zip'
 
       - name: Upload Complete Check
         if: always()
-        run: echo "Codebase snapshot script finished attempt."
+        run: echo "Codebase snapshot action finished attempt."
