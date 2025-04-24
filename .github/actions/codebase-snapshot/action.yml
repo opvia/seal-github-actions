@@ -29,8 +29,29 @@ inputs:
     default: 'zip'
 
 runs:
-  using: 'node20'
-  main: 'dist/index.js'
+  using: 'composite'
+  steps:
+    - name: Install Runtime Dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y --no-install-recommends zip tar
+      shell: bash
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Run Action Script
+      run: node ${{ github.action_path }}/dist/index.js
+      shell: bash
+      env: 
+        INPUT_SEAL_API_TOKEN: ${{ inputs.seal_api_token }}
+        INPUT_SEAL_API_BASE_URL: ${{ inputs.seal_api_base_url }}
+        INPUT_SEAL_TEMPLATE_ID: ${{ inputs.seal_template_id }}
+        INPUT_SEAL_SNAPSHOT_FIELD_NAME: ${{ inputs.seal_snapshot_field_name }}
+        INPUT_SEAL_FILE_TYPE_TITLE: ${{ inputs.seal_file_type_title }}
+        INPUT_EXCLUDE_PATTERNS: ${{ inputs.exclude_patterns }}
+        INPUT_ARCHIVE_TYPE: ${{ inputs.archive_type }}
 
 branding:
   icon: 'archive'

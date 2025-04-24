@@ -19,11 +19,6 @@ jobs:
       - name: Checkout Main Repo
         uses: actions/checkout@v4
 
-      - name: Install Runtime Dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends zip tar
-        shell: bash
-
       - name: Run Codebase Snapshot Action
         uses: opvia/seal-github-actions/.github/actions/codebase-snapshot@main
         with:
