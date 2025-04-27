@@ -2,10 +2,8 @@ name: Codebase Snapshot via Uses
 
 on:
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+    branches:
+      - rc/*
 
 permissions:
   contents: read

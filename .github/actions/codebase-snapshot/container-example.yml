@@ -1,11 +1,9 @@
-name: Create Seal Snapshot on PR
+name: Codebase Snapshot via Image
 
 on:
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+    branches:
+      - rc/*
 
 permissions:
   contents: read        
@@ -13,22 +11,21 @@ permissions:
   packages: read      
 
 jobs:
-  create_snapshot:
-    if: startsWith(github.head_ref, 'rc/') && contains(github.base_ref, 'r') 
+  codebase_snapshot_via_image:
     runs-on: ubuntu-latest 
 
     steps:
-      # Step 1: Checkout code so the action can access it
+      # Step 1: Checkout code (of the repo using the action)
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Set to 0 to get all history
+          fetch-depth: 0 
 
       # Step 2: Run the published Docker container action
       - name: Create and Upload Seal Snapshot
-        uses: docker://ghcr.io/opvia/codebase-snapshot-action:v1.0.2 # Or latest 
+        uses: docker://ghcr.io/opvia/codebase-snapshot-action:latest # Or version 
         with:
-          seal_api_token: ${{ secrets.SEAL_API_TOKEN }} # Add api key to repo secrets
+          seal_api_token: ${{ secrets.SEAL_API_TOKEN }} 
           seal_api_base_url: 'https://us.backend.seal.run/api/'
           seal_template_id: '3eecf18f-da15-429c-968a-df43ba85c970'
           seal_snapshot_field_name: 'Code Snapshot' 
@@ -36,8 +33,3 @@ jobs:
 
           exclude_patterns: '.git/*' 
           archive_type: 'zip'
-
-      # Optional: Add post snapshot steps
-      - name: Post Snapshot Step (Example)
-        if: always()
-        run: echo "Snapshot action completed."

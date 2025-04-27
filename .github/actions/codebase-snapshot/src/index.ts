@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
-import * as exec from '@actions/exec';
+import archiver from 'archiver'
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
@@ -17,6 +18,42 @@ import {
 	type SealFileReference,
 } from '../../common/src/seal-api.js'; // Adjust paths
 
+// Define types for archiver errors
+interface ArchiverError extends Error {
+	code?: string;
+}
+
+interface ArchiveFormatConfig {
+	format: 'zip' | 'tar';
+	extension: string;
+	gzip: boolean;
+}
+
+/**
+ * Gets the archive format configuration based on the specified type.
+ * @param archiveType The type of archive to create
+ * @returns Object containing format and extension information
+ * @throws Error if the archive type is not supported
+ */
+function getArchiveFormat(archiveType: string): ArchiveFormatConfig {
+	switch (archiveType) {
+		case 'zip':
+			return {
+				format: 'zip',
+				extension: 'zip',
+				gzip: false
+			};
+		case 'tar':
+			return {
+				format: 'tar',
+				extension: 'tar.gz',
+				gzip: true
+			};
+		default:
+			throw new Error(`Unsupported archive type: ${archiveType}. Supported types are 'zip' and 'tar'.`);
+	}
+}
+
 /**
  * Creates the codebase archive.
  * @returns The absolute path to the created archive file.
@@ -27,53 +64,70 @@ async function createArchive(
 	snapshotDir: string, // Temporary directory path
 ): Promise<string> {
 	core.startGroup('Creating Codebase Archive');
-	const timestamp = new Date().valueOf()
-	const extension = inputs.archiveType === 'zip' ? 'zip' : 'tar.gz';
-	const archiveName = `${prContext.repoName}-PR${prContext.prNumber}-${timestamp}.${extension}`;
+	const timestamp = new Date().valueOf();
+	
+	// Get archive format configuration
+	const archiveConfig = getArchiveFormat(inputs.archiveType);
+	
+	const archiveName = `${prContext.repoName}-PR${prContext.prNumber}-${timestamp}.${archiveConfig.extension}`;
 	const archivePath = path.join(snapshotDir, archiveName);
 
-	core.info(`Archive type: ${inputs.archiveType}`);
+	core.info(`Archive type: ${archiveConfig.format} (${archiveConfig.extension})`);
 	core.info(`Archive path: ${archivePath}`);
 
-	const command = inputs.archiveType; // 'zip' or 'tar'
-	const args: string[] = [];
 	const patterns = inputs.excludePatterns.split(/\s+/).filter(p => p.length > 0);
 	core.info(`Exclude patterns: ${patterns.join(', ') || 'None'}`);
 
-	// Construct command arguments
-	if (command === 'zip') {
-		args.push('-r', archivePath, '.'); // recursive, output file, source dir
-		patterns.forEach(pattern => args.push('-x', pattern));
-	} else { // tar
-		args.push('czf', archivePath); // create, gzip, file
-		patterns.forEach(pattern => args.push(`--exclude=${pattern}`));
-		args.push('.'); // source dir MUST be last for tar --exclude
-	}
+	return new Promise<string>((resolve, reject) => {
+		const output = fsSync.createWriteStream(archivePath);
+		const archive = archiver(archiveConfig.format, {
+			gzip: archiveConfig.gzip,
+			zlib: { level: 9 } // Maximum compression level
+		});
 
-	core.info(`Running command: ${command} ${args.join(' ')} in ${prContext.workspace}`);
+		output.on('close', async () => {
+			try {
+				const stats = await fs.stat(archivePath);
+				if (stats.size === 0) {
+					reject(new Error(`Created archive file is empty: ${archivePath}`));
+					return;
+				}
+				core.info(`✅ Successfully created ${archiveConfig.format} archive: ${archiveName} (${archive.pointer()} bytes)`);
+				core.endGroup();
+				resolve(archivePath);
+			} catch (statError) {
+				reject(new Error(`Failed to stat created archive file "${archivePath}": ${JSON.stringify(statError)}`));
+			}
+		});
 
-	const execOptions: exec.ExecOptions = {
-		cwd: prContext.workspace, // Run command in the checked-out code directory
-	};
+		output.on('error', (err: Error) => {
+			reject(new Error(`Output stream error: ${err.message}`));
+		});
 
-	const exitCode = await exec.exec(command, args, execOptions);
-	if (exitCode !== 0) {
-		throw new Error(`Archiving command '${command}' failed with exit code ${exitCode}`);
-	}
+		archive.on('warning', (err: ArchiverError) => {
+			if (err.code === 'ENOENT') {
+				// File not found warning
+				core.warning(`Warning during archiving: ${err.message}`);
+			} else {
+				reject(new Error(`Archiving error: ${err.message}`));
+			}
+		});
 
-	// Verify archive exists and is not empty
-	try {
-		const stats = await fs.stat(archivePath);
-		if (stats.size === 0) {
-			throw new Error(`Created archive file is empty: ${archivePath}`);
-		}
-		core.info(`✅ Successfully created ${inputs.archiveType} archive: ${archiveName} (${stats.size} bytes)`);
-	} catch (statError) {
-		throw new Error(`Failed to stat created archive file "${archivePath}": ${JSON.stringify(statError)}`);
-	}
+		archive.on('error', (err: ArchiverError) => {
+			reject(new Error(`Archiving failed: ${err.message}`));
+		});
 
-	core.endGroup();
-	return archivePath; // Return the full path
+		archive.pipe(output);
+
+		// Add files from the workspace directory, excluding specified patterns
+		archive.glob('**/*', {
+			cwd: prContext.workspace,
+			ignore: patterns,
+			dot: true // Include dotfiles
+		});
+
+		archive.finalize();
+	});
 }
 
 /**

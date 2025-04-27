@@ -37,10 +37,12 @@
     "@vercel/ncc": "^0.38.3",
     "jest": "^29.7.0",
     "ts-jest": "^29.3.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@types/archiver": "^6.0.3"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
-    "@actions/glob": "^0.5.0"
+    "@actions/glob": "^0.5.0",
+    "archiver": "^7.0.1"
   }
 }
