@@ -1,7 +1,8 @@
 import * as core from '@actions/core';
-import axios, { AxiosError, type AxiosRequestConfig, type AxiosResponse } from 'axios';
+import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Crc32c } from '@aws-crypto/crc32c';
 
 // Simplified Seal Entity structure based on simplifiedEntitySchema and script usage
 interface SealEntityLite {
@@ -71,6 +72,43 @@ function createApiConfig(
 			return status >= 200 && status < 500;
 		},
 	};
+}
+
+/**
+ * Calculates the CRC32C hash of a file.
+ * @param filePath The absolute path to the file.
+ * @returns A promise that resolves with the CRC32C hash as a stringified unsigned 32-bit integer.
+ */
+function calculateCRC32CHash(filePath: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const hasher = new Crc32c();
+		const stream = fs.createReadStream(filePath);
+
+		stream.on('data', (chunk) => {
+			if (Buffer.isBuffer(chunk)) {
+				hasher.update(chunk);
+			} else {
+				reject(new Error(`Unexpected string chunk received while hashing file: ${filePath}`));
+				stream.destroy();
+				return;
+			}
+		});
+
+		stream.on('end', () => {
+			const hashNumber = hasher.digest();
+			
+			if (typeof hashNumber !== 'number') {
+				reject(new Error(`CRC32C digest did not return a number. Type: ${typeof hashNumber}`));
+				return;
+			}
+
+			resolve(hashNumber.toString());
+		});
+
+		stream.on('error', (err) => {
+			reject(new Error(`Error reading file "${filePath}" for CRC32C calculation: ${err.message}`));
+		});
+	});
 }
 
 // --- API Functions ---
@@ -319,9 +357,14 @@ export async function uploadSealFile(
 	fileTypeTitle: string,
 ): Promise<string> {
 	const functionName = 'uploadSealFile';
+	const baseFilename = path.basename(filePath);
 	core.info(
-		`[${functionName}] Uploading file "${path.basename(filePath)}" as "${sealFilename}" with type "${fileTypeTitle}"`,
+		`[${functionName}] Uploading file "${baseFilename}" as "${sealFilename}" with type "${fileTypeTitle}"`, 
 	);
+
+	core.debug(`[${functionName}] Calculating CRC32C hash for ${baseFilename}...`);
+	const crc32cHash = await calculateCRC32CHash(filePath);
+	core.info(`[${functionName}] Calculated CRC32C Hash: ${crc32cHash}`);
 
 	const baseUrl = normalizeApiUrl(apiUrl);
 	const url = `${baseUrl}files`;
@@ -339,13 +382,14 @@ export async function uploadSealFile(
 		params: {
 			filename: sealFilename,
 			typeTitle: fileTypeTitle,
+			crc32cHash
 		},
 		data: fileStream,
 		maxContentLength: Infinity, // Needed for large file uploads
 		maxBodyLength: Infinity,
 	};
 
-	core.debug(`[${functionName}] Making POST request to ${url}`);
+	core.debug(`[${functionName}] Making POST request to ${url} with params: ${JSON.stringify(config.params)}`);
 	let response: AxiosResponse<SealFileUploadResponse>;
 	try {
 		const startTime = Date.now();
@@ -358,12 +402,13 @@ export async function uploadSealFile(
 
 		if (axios.isAxiosError(error)) {
 			core.error(`[${functionName}] API request failed: ${message}`);
+			core.error(`[${functionName}] Response Status: ${error.response?.status}`);
 			core.error(`[${functionName}] Response Data: ${JSON.stringify(error.response?.data)}`);
 			message = `Axios error: ${message}`;
 		} else {
 			core.error(`[${functionName}] Non-axios error during request: ${error}`);
 		}
-		throw new Error(`Failed to upload file "${sealFilename}": ${message}`);
+		throw new Error(`Failed to upload file "${sealFilename}" (CRC32C: ${crc32cHash}): ${message}`);
 	}
 
 	// Allow 200 or 201 for creation
