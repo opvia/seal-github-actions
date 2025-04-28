@@ -12,6 +12,8 @@ import {
 	getSealFileVersion,
 	linkFilesToEntityField,
 	uploadSealFile,
+	getSealEntityChangeSetIndex,
+	addEntityToChangeSet,
 	type SealFileReference, // Import the type if not already exported/imported
 } from '../../common/src/seal-api.js'; // Adjust path
 
@@ -44,9 +46,9 @@ async function run(): Promise<void> {
 		core.info(`Searching for patterns: ${patterns.join(', ')} in ${prContext.workspace}`);
 
 		const globOptions = {
-			followSymbolicLinks: false, // Match behavior of default find
+			followSymbolicLinks: false, 
 			implicitDescendants: true,
-			matchDirectories: false, // We only want files
+			matchDirectories: false, 
 			cwd: prContext.workspace // <-- Explicitly set the CWD for glob
 		};
 		const globber = await glob.create(patterns.join('\n'), globOptions);
@@ -71,54 +73,82 @@ async function run(): Promise<void> {
 		);
 		core.endGroup();
 
-		// --- Step 3: Upload Artifacts & Collect IDs/Versions ---
-		core.startGroup('Uploading Artifacts');
+		// --- Step 2b: Get Changeset Index for the Target Entity ---
+		core.startGroup('Getting Changeset Index');
+		const changeSetIndex = await getSealEntityChangeSetIndex(
+			inputs.sealApiBaseUrl,
+			inputs.sealApiToken,
+			entityId,
+		);
+		core.endGroup();
+
+		// --- Step 3: Upload Artifacts, Add to Changeset & Collect Refs ---
+		core.startGroup('Processing Artifacts (Upload & Add to Changeset)');
         const timestamp = new Date().valueOf();
 		const uploadedFileRefs: SealFileReference[] = [];
-		let uploadFailedCount = 0;
+		let processingFailedCount = 0;
 
 		for (const filePath of foundFiles) {
 			const originalFilename = path.basename(filePath);
+			const relativePath = path.relative(prContext.workspace, filePath);
 			// Construct unique filename for Seal using timestamp
 			const sealFilename = `artifact-${originalFilename}-PR${prContext.prNumber}-${timestamp}`;
-			core.info(`Attempting upload for: ${path.relative(prContext.workspace, filePath)} as ${sealFilename}`);
+			core.info(`Processing artifact: ${relativePath} -> ${sealFilename}`);
+
+			let fileId: string | null = null; // Keep track of fileId in case changeset add fails
 
 			try {
-				const fileId = await uploadSealFile(
+				// 1. Upload the file
+				core.debug(` -> Uploading...`);
+				fileId = await uploadSealFile(
 					inputs.sealApiBaseUrl,
 					inputs.sealApiToken,
 					filePath, // Pass absolute path
 					sealFilename,
 					inputs.sealFileTypeTitle,
 				);
+				core.debug(` -> Uploaded. File ID: ${fileId}`);
 
-				// Get version immediately after successful upload
+				// 2. Add the uploaded file entity to the changeset
+				core.debug(` -> Adding File ID ${fileId} to Changeset Index ${changeSetIndex}...`);
+				await addEntityToChangeSet(
+					inputs.sealApiBaseUrl,
+					inputs.sealApiToken,
+					fileId,
+					changeSetIndex,
+				);
+				core.debug(` -> Added to changeset.`);
+
+				// 3. Get the file version (needed for linking)
+				core.debug(` -> Getting file version...`);
 				const fileVersion = await getSealFileVersion(
 					inputs.sealApiBaseUrl,
 					inputs.sealApiToken,
 					fileId,
 				);
+				core.debug(` -> File version: ${fileVersion ?? 'null'}`);
 
 				uploadedFileRefs.push({ id: fileId, version: fileVersion });
-				core.info(` -> Successfully uploaded ${sealFilename}. File ID: ${fileId}, Version: ${fileVersion ?? 'null'}`);
+				core.info(` -> Successfully processed ${sealFilename}. File ID: ${fileId}, Version: ${fileVersion ?? 'null'}`);
 
 			} catch (error: unknown) {
-				uploadFailedCount++;
-				// Log warning but continue processing other files
-				core.warning(`Upload failed for "${filePath}": ${error instanceof Error ? error.message : String(error)}`);
+				processingFailedCount++;
+				const action = fileId ? 'add to changeset or get version' : 'upload';
+				// Log error but continue processing other files
+				core.error(`Processing failed for "${relativePath}" during ${action}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
-        core.info(`Finished uploading. Successful: ${uploadedFileRefs.length}, Failed: ${uploadFailedCount}.`);
+        core.info(`Finished processing. Succeeded: ${uploadedFileRefs.length}, Failed: ${processingFailedCount}.`);
 		core.endGroup();
 
 
-		// --- Step 4: Link Uploaded Files to Entity ---
+		// --- Step 4: Link Successfully Processed Files to Entity ---
         core.startGroup('Linking Files to Seal Entity');
 		if (uploadedFileRefs.length === 0) {
-			core.info('No files were successfully uploaded. Skipping linking step.');
-			if (uploadFailedCount > 0) {
-				// If uploads failed, the overall action should fail
-				throw new Error(`${uploadFailedCount} artifact upload(s) failed.`);
+			core.info('No files were successfully processed (uploaded and added to changeset). Skipping linking step.');
+			if (processingFailedCount > 0) {
+				// If any processing step failed, the overall action should fail
+				throw new Error(`${processingFailedCount} artifact processing step(s) failed.`);
 			}
             // If no files were uploaded but no errors occurred (e.g., no matching files found initially), exit gracefully.
             // This case is technically handled earlier, but included for robustness.

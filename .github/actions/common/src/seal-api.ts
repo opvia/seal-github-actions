@@ -22,10 +22,22 @@ interface SealFileUploadResponse {
 	// The response might be the full SealEntityLite, but only ID is strictly needed
 }
 
-// Structure for the file reference used in linking
 export interface SealFileReference {
 	id: string;
 	version: number | null;
+}
+
+interface SealChangeSetResponse {
+	id: string;
+	index: string;
+	name: string;
+	status: 'OPEN' | 'IN_REVIEW' | 'CLOSED';
+	description: string | null;
+	entityRefs: SealFileReference[];
+}
+
+interface AddToChangeSetBody {
+	changeSetIndex: string;
 }
 
 // --- Helper Functions ---
@@ -167,6 +179,131 @@ export async function findSealEntityId(
 	}
 	core.info(`[${functionName}] Found unique Seal entity ID: ${entityId}`);
 	return entityId;
+}
+
+/**
+ * Retrieves the index of the changeset associated with a given Seal entity.
+ * @returns The changeset index string.
+ * @throws If the entity is not found, not part of a changeset, or API error occurs.
+ */
+export async function getSealEntityChangeSetIndex(
+	apiUrl: string,
+	apiToken: string,
+	entityId: string,
+): Promise<string> {
+	const functionName = 'getSealEntityChangeSetIndex';
+	core.info(`[${functionName}] Getting changeset index for Entity ID: ${entityId}`);
+
+	const baseUrl = normalizeApiUrl(apiUrl);
+	const url = `${baseUrl}entities/${entityId}/change-set`;
+	const config: AxiosRequestConfig = {
+		...createApiConfig(apiToken),
+		method: 'GET',
+		url,
+	};
+
+	core.debug(`[${functionName}] Making GET request to ${url}`);
+	let response: AxiosResponse<SealChangeSetResponse>;
+	try {
+		response = await axios(config);
+		core.info(`[${functionName}] API response status: ${response.status}`);
+	} catch (error: unknown) {
+		core.error(`[${functionName}] API request failed: ${error instanceof Error ? error.message : String(error)}`);
+		if (axios.isAxiosError(error)) {
+			const status = error.response?.status ?? 'Unknown Status';
+			const data = error.response?.data ?? 'No response data';
+			core.error(`[${functionName}] Response Status: ${status}`);
+			core.error(`[${functionName}] Response Data: ${JSON.stringify(data)}`);
+			// Throw the response status and data from the error object
+			throw new Error(`[${functionName}] API Error: ${status} - ${JSON.stringify(data)}`);
+		} else {
+			throw error; // Re-throw other errors
+		}
+	}
+
+	if (response.status !== 200) {
+		core.error(
+			`[${functionName}] API error getting changeset: ${response.status} ${response.statusText}`,
+		);
+		core.error(`[${functionName}] API error body: ${JSON.stringify(response.data)}`);
+		throw new Error(
+			`[${functionName}] API Error: ${response.status} - ${JSON.stringify(response.data)}`,
+		);
+	}
+
+	const changeSetIndex = response.data?.index;
+	if (!changeSetIndex || typeof changeSetIndex !== 'string') {
+		core.error(
+			`[${functionName}] Changeset request succeeded (Status: ${response.status}), but failed to extract index.`,
+		);
+		core.error(`[${functionName}] Response Body: ${JSON.stringify(response.data)}`);
+		throw new Error(`[${functionName}] Missing or invalid changeset index in API response.`);
+	}
+
+	core.info(`[${functionName}] Found changeset index: ${changeSetIndex}`);
+	return changeSetIndex;
+}
+
+/**
+ * Adds a specified entity to a changeset identified by its index.
+ * @throws If the API request fails.
+ */
+export async function addEntityToChangeSet(
+	apiUrl: string,
+	apiToken: string,
+	entityIdToAdd: string,
+	changeSetIndex: string,
+): Promise<void> {
+	const functionName = 'addEntityToChangeSet';
+	core.info(
+		`[${functionName}] Adding Entity ID ${entityIdToAdd} to ChangeSet Index ${changeSetIndex}`,
+	);
+
+	const baseUrl = normalizeApiUrl(apiUrl);
+	const url = `${baseUrl}entities/${entityIdToAdd}/add-to-change-set`;
+	const payload: AddToChangeSetBody = { changeSetIndex };
+
+	const config: AxiosRequestConfig = {
+		...createApiConfig(apiToken),
+		method: 'POST',
+		url,
+		data: payload,
+	};
+
+	core.debug(`[${functionName}] Making POST request to ${url}`);
+	core.debug(`[${functionName}] Payload: ${JSON.stringify(payload)}`);
+
+	let response: AxiosResponse;
+	try {
+		response = await axios(config);
+		core.info(`[${functionName}] API response status: ${response.status}`);
+	} catch (error: unknown) {
+		core.error(`[${functionName}] API request failed: ${error instanceof Error ? error.message : String(error)}`);
+		if (axios.isAxiosError(error)) {
+			const status = error.response?.status ?? 'Unknown Status';
+			const data = error.response?.data ?? 'No response data';
+			core.error(`[${functionName}] Response Status: ${status}`);
+			core.error(`[${functionName}] Response Data: ${JSON.stringify(data)}`);
+			// Throw the response status and data from the error object
+			throw new Error(`[${functionName}] API Error: ${status} - ${JSON.stringify(data)}`);
+		} else {
+			throw error; // Re-throw other errors
+		}
+	}
+
+	if (response.status !== 200) {
+		core.error(
+			`[${functionName}] API error adding to changeset: ${response.status} ${response.statusText}`,
+		);
+		core.error(`[${functionName}] API error body: ${JSON.stringify(response.data)}`);
+		throw new Error(
+			`[${functionName}] API Error: ${response.status} - ${JSON.stringify(response.data)}`,
+		);
+	}
+
+	core.info(
+		`[${functionName}] Successfully added entity ${entityIdToAdd} to changeset ${changeSetIndex}.`,
+	);
 }
 
 /**

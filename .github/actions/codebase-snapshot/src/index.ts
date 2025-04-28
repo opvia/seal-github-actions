@@ -15,6 +15,8 @@ import {
 	getSealFileVersion,
 	linkFilesToEntityField,
 	uploadSealFile,
+	getSealEntityChangeSetIndex,
+	addEntityToChangeSet,
 	type SealFileReference,
 } from '../../common/src/seal-api.js'; // Adjust paths
 
@@ -166,6 +168,15 @@ async function run(): Promise<void> {
 		);
 		core.endGroup();
 
+		// --- Step 2b: Get Changeset Index ---
+		core.startGroup('Getting Changeset Index');
+		const changeSetIndex = await getSealEntityChangeSetIndex(
+			inputs.sealApiBaseUrl,
+			inputs.sealApiToken,
+			entityId,
+		);
+		core.endGroup();
+
 		// --- Step 3: Upload Codebase Archive ---
 		core.startGroup('Uploading Codebase Snapshot');
 		const sealFilename = path.basename(archivePath); // Use the generated archive name
@@ -175,6 +186,16 @@ async function run(): Promise<void> {
 			archivePath, // Pass absolute path to archive
 			sealFilename,
 			inputs.sealFileTypeTitle,
+		);
+		core.endGroup();
+
+		// --- Step 3b: Add Snapshot to Changeset ---
+		core.startGroup('Adding Snapshot to Changeset');
+		await addEntityToChangeSet(
+			inputs.sealApiBaseUrl,
+			inputs.sealApiToken,
+			fileId,
+			changeSetIndex,
 		);
 		core.endGroup();
 
