@@ -80361,10 +80361,7 @@ function createApiConfig(apiToken, extraHeaders = {}) {
             Accept: 'application/json',
             ...extraHeaders,
         },
-        validateStatus: function (status) {
-            // Don't throw for non-2xx status, handle it manually
-            return status >= 200 && status < 500;
-        },
+        validateStatus: (status) => status >= 200 && status < 500,
     };
 }
 /**
@@ -80377,14 +80374,12 @@ function calculateCRC32CHash(filePath) {
         const hasher = new main.Crc32c();
         const stream = external_node_fs_default().createReadStream(filePath);
         stream.on('data', (chunk) => {
-            // Ensure chunk is a Buffer before updating
             if (Buffer.isBuffer(chunk)) {
                 hasher.update(chunk);
             }
             else {
-                // Handle string chunk if necessary, or reject if unexpected
                 reject(new Error(`Unexpected string chunk received while hashing file: ${filePath}`));
-                stream.destroy(); // Stop the stream
+                stream.destroy();
                 return;
             }
         });
@@ -80407,8 +80402,8 @@ function calculateCRC32CHash(filePath) {
  * @returns The ID of the found entity.
  * @throws If no unique entity is found or API error occurs.
  */
-async function findSealEntityId(apiUrl, apiToken, prNumber, templateId) {
-    const functionName = 'findSealEntityId';
+async function findSealEntity(apiUrl, apiToken, prNumber, templateId) {
+    const functionName = 'findSealEntity';
     const searchTerm = `#${prNumber}`;
     lib_core.info(`[${functionName}] Searching for entity containing "${searchTerm}" with Template ID: ${templateId}`);
     if (!templateId) {
@@ -80468,13 +80463,13 @@ async function findSealEntityId(apiUrl, apiToken, prNumber, templateId) {
         lib_core.error(`[${functionName}] Found multiple entities (${matchingEntities.map((e) => e.id).join(', ')}) matching criteria. Cannot proceed.`);
         throw new Error(`Found multiple entities matching title "${searchTerm}" and template ID "${templateId}". Cannot link artifact/snapshot.`);
     }
-    const entityId = matchingEntities[0]?.id;
-    if (!entityId) {
-        lib_core.error(`[${functionName}] Found unique Seal entity ID: ${entityId}`);
-        throw new Error(`Found unique Seal entity ID: ${entityId}`);
+    const entity = matchingEntities[0];
+    if (!entity) {
+        lib_core.error(`[${functionName}] Found unique Seal entity: ${entity}`);
+        throw new Error(`Found unique Seal entity: ${entity}`);
     }
-    lib_core.info(`[${functionName}] Found unique Seal entity ID: ${entityId}`);
-    return entityId;
+    lib_core.info(`[${functionName}] Found unique Seal entity: ${entity}`);
+    return entity;
 }
 /**
  * Retrieves the index of the changeset associated with a given Seal entity.
@@ -80507,9 +80502,7 @@ async function getSealEntityChangeSetIndex(apiUrl, apiToken, entityId) {
             // Throw the response status and data from the error object
             throw new Error(`[${functionName}] API Error: ${status} - ${JSON.stringify(data)}`);
         }
-        else {
-            throw error; // Re-throw other errors
-        }
+        throw error;
     }
     if (response.status !== 200) {
         lib_core.error(`[${functionName}] API error getting changeset: ${response.status} ${response.statusText}`);
@@ -80558,9 +80551,7 @@ async function addEntityToChangeSet(apiUrl, apiToken, entityIdToAdd, changeSetIn
             // Throw the response status and data from the error object
             throw new Error(`[${functionName}] API Error: ${status} - ${JSON.stringify(data)}`);
         }
-        else {
-            throw error; // Re-throw other errors
-        }
+        throw error;
     }
     if (response.status !== 200) {
         lib_core.error(`[${functionName}] API error adding to changeset: ${response.status} ${response.statusText}`);
@@ -80599,8 +80590,8 @@ async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileType
             crc32cHash
         },
         data: fileStream,
-        maxContentLength: Infinity, // Needed for large file uploads
-        maxBodyLength: Infinity,
+        maxContentLength: Number.POSITIVE_INFINITY, // Needed for large file uploads
+        maxBodyLength: Number.POSITIVE_INFINITY,
     };
     lib_core.debug(`[${functionName}] Making POST request to ${url} with params: ${JSON.stringify(config.params)}`);
     let response;
@@ -80623,7 +80614,6 @@ async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileType
         else {
             lib_core.error(`[${functionName}] Non-axios error during request: ${error}`);
         }
-        // Include hash in error message for context
         throw new Error(`Failed to upload file "${sealFilename}" (CRC32C: ${crc32cHash}): ${message}`);
     }
     // Allow 200 or 201 for creation
@@ -80742,6 +80732,50 @@ async function linkFilesToEntityField(apiUrl, apiToken, entityId, fieldName, fil
     else {
         lib_core.info(`[${functionName}] Successfully linked ${fileReferences.length} file(s) to Seal entity field "${fieldName}".`);
     }
+}
+async function archiveEntities(apiUrl, apiToken, fileRefs) {
+    const functionName = 'archiveEntities';
+    if (!fileRefs || fileRefs.length === 0) {
+        lib_core.info(`[${functionName}] No existing file references provided. Skipping archival.`);
+        return;
+    }
+    lib_core.info(`[${functionName}] Attempting to archive ${fileRefs.length} existing entity/file reference(s)...`);
+    const baseUrl = normalizeApiUrl(apiUrl);
+    const archivePromises = fileRefs.map(async (ref) => {
+        if (!ref?.id) {
+            lib_core.warning(`[${functionName}] Skipping invalid file reference: ${JSON.stringify(ref)}`);
+            return { id: 'invalid', status: 'skipped' };
+        }
+        const entityId = ref.id;
+        const url = `${baseUrl}entities/${entityId}/archive`;
+        const config = {
+            ...createApiConfig(apiToken),
+            method: 'POST',
+            url,
+        };
+        lib_core.debug(`[${functionName}] Making POST request to ${url} for entity ID ${entityId}`);
+        try {
+            const response = await lib_axios(config);
+            if (response.status === 200) {
+                lib_core.info(`[${functionName}] Successfully archived entity ID: ${entityId}`);
+                return { id: entityId, status: 'success' };
+            }
+            lib_core.warning(`[${functionName}] Received non-200 status (${response.status}) attempting to archive entity ID ${entityId}: ${JSON.stringify(response.data)}`);
+            return { id: entityId, status: 'failed', error: `Status ${response.status}` };
+        }
+        catch (error) {
+            let message = 'Unknown error';
+            if (error instanceof Error)
+                message = error.message;
+            lib_core.error(`[${functionName}] Failed to archive entity ID ${entityId}: ${message}`);
+            if (lib_axios.isAxiosError(error)) {
+                lib_core.error(`[${functionName}] Response Data: ${JSON.stringify(error.response?.data)}`);
+            }
+            return { id: entityId, status: 'failed', error: message };
+        }
+    });
+    await Promise.allSettled(archivePromises);
+    return;
 }
 
 ;// CONCATENATED MODULE: ./codebase-snapshot/src/index.ts
@@ -80862,7 +80896,8 @@ async function run() {
         archivePath = await createArchive(inputs, prContext, snapshotDir);
         // --- Step 2: Find Target Seal Entity ---
         lib_core.startGroup('Finding Seal Entity');
-        const entityId = await findSealEntityId(inputs.sealApiBaseUrl, inputs.sealApiToken, prContext.prNumber, inputs.sealTemplateId);
+        const entity = await findSealEntity(inputs.sealApiBaseUrl, inputs.sealApiToken, prContext.prNumber, inputs.sealTemplateId);
+        const entityId = entity.id;
         lib_core.endGroup();
         // --- Step 2b: Get Changeset Index ---
         lib_core.startGroup('Getting Changeset Index');
@@ -80878,7 +80913,12 @@ async function run() {
         lib_core.startGroup('Adding Snapshot to Changeset');
         await addEntityToChangeSet(inputs.sealApiBaseUrl, inputs.sealApiToken, fileId, changeSetIndex);
         lib_core.endGroup();
-        // --- Step 4: Link File to Entity ---
+        // -- Step 4a: Archive previous seal snapshot file
+        lib_core.startGroup('Archiving Previous Seal Snapshot File');
+        const existingFiledRefs = entity.fields?.[inputs.snapshotFieldName]?.value;
+        await archiveEntities(inputs.sealApiBaseUrl, inputs.sealApiToken, existingFiledRefs);
+        lib_core.endGroup();
+        // --- Step 4b: Link File to Entity ---
         lib_core.startGroup('Linking Snapshot to Seal Entity');
         const fileVersion = await getSealFileVersion(inputs.sealApiBaseUrl, inputs.sealApiToken, fileId);
         const fileReferences = [{ id: fileId, version: fileVersion }];
