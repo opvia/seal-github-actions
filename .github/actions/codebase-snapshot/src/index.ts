@@ -11,13 +11,14 @@ import {
 	type CodebaseSnapshotInputs,
 } from '../../common/src/github-context.js'; // Adjust paths if structure differs
 import {
-	findSealEntityId,
+	findSealEntity,
 	getSealFileVersion,
 	linkFilesToEntityField,
 	uploadSealFile,
 	getSealEntityChangeSetIndex,
 	addEntityToChangeSet,
 	type SealFileReference,
+	archiveEntities,
 } from '../../common/src/seal-api.js'; // Adjust paths
 
 // Define types for archiver errors
@@ -160,12 +161,13 @@ async function run(): Promise<void> {
 
 		// --- Step 2: Find Target Seal Entity ---
 		core.startGroup('Finding Seal Entity');
-		const entityId = await findSealEntityId(
+		const entity = await findSealEntity(
 			inputs.sealApiBaseUrl,
 			inputs.sealApiToken,
 			prContext.prNumber,
 			inputs.sealTemplateId,
 		);
+		const entityId = entity.id;
 		core.endGroup();
 
 		// --- Step 2b: Get Changeset Index ---
@@ -199,7 +201,17 @@ async function run(): Promise<void> {
 		);
 		core.endGroup();
 
-		// --- Step 4: Link File to Entity ---
+		// -- Step 4a: Archive previous seal snapshot file
+		core.startGroup('Archiving Previous Seal Snapshot File');
+		const existingFiledRefs = entity.fields?.[inputs.snapshotFieldName]?.value;
+		await archiveEntities(
+			inputs.sealApiBaseUrl,
+			inputs.sealApiToken,
+			existingFiledRefs,
+		);
+		core.endGroup();
+
+		// --- Step 4b: Link File to Entity ---
 		core.startGroup('Linking Snapshot to Seal Entity');
 		const fileVersion = await getSealFileVersion(
 			inputs.sealApiBaseUrl,

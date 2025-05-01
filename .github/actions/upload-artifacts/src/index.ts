@@ -8,13 +8,14 @@ import {
 	type UploadArtifactsInputs,
 } from '../../common/src/github-context.js'; // Adjust path as needed if compiled differently
 import {
-	findSealEntityId,
 	getSealFileVersion,
 	linkFilesToEntityField,
 	uploadSealFile,
 	getSealEntityChangeSetIndex,
 	addEntityToChangeSet,
-	type SealFileReference, // Import the type if not already exported/imported
+	type SealFileReference,
+	findSealEntity, // Import the type if not already exported/imported
+	archiveEntities, // Import the archiveEntities function
 } from '../../common/src/seal-api.js'; // Adjust path
 
 /**
@@ -60,17 +61,20 @@ async function run(): Promise<void> {
 			return; // Exit successfully
 		}
 		core.info(`Found ${foundFiles.length} artifact files:`);
-        foundFiles.forEach(file => core.info(`  - ${path.relative(prContext.workspace, file)}`)); // Log relative path
+        for (const file of foundFiles) {
+            core.info(`  - ${path.relative(prContext.workspace, file)}`); // Log relative path
+        }
 		core.endGroup();
 
 		// --- Step 2: Find Target Seal Entity ---
 		core.startGroup('Finding Seal Entity');
-		const entityId = await findSealEntityId(
+		const entity = await findSealEntity(
 			inputs.sealApiBaseUrl,
 			inputs.sealApiToken,
 			prContext.prNumber,
 			inputs.sealTemplateId,
 		);
+		const entityId = entity.id;
 		core.endGroup();
 
 		// --- Step 2b: Get Changeset Index for the Target Entity ---
@@ -156,6 +160,17 @@ async function run(): Promise<void> {
 			return;
 		}
 
+		// --- Step 4a: Archive Previous Artifacts ---
+		core.startGroup('Archiving Previous Artifacts');
+		const existingFileRefs = entity.fields?.[inputs.fieldName]?.value;
+		await archiveEntities(
+			inputs.sealApiBaseUrl,
+			inputs.sealApiToken,
+			existingFileRefs,
+		);
+		core.endGroup();
+
+		// --- Step 4b: Link New Files to Entity ---
 		await linkFilesToEntityField(
 			inputs.sealApiBaseUrl,
 			inputs.sealApiToken,
@@ -163,7 +178,7 @@ async function run(): Promise<void> {
 			inputs.fieldName, // Use the correct field name for artifacts
 			uploadedFileRefs,
 		);
-        core.endGroup();
+		core.endGroup();
 
         core.info('✅ Upload Artifacts Action Completed Successfully.');
 

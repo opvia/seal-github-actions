@@ -14,13 +14,18 @@ interface SealEntityLite {
 			id?: string;
 		};
 	};
-	// Add other potentially useful fields if needed
+	fields?: {
+		// include more field schemas
+		[fieldName: string]: {
+			type: 'REFERENCE';
+			value: SealFileReference[];
+		}
+	}
 }
 
 // Response structure for successful file upload
 interface SealFileUploadResponse {
 	id: string;
-	// The response might be the full SealEntityLite, but only ID is strictly needed
 }
 
 export interface SealFileReference {
@@ -67,10 +72,7 @@ function createApiConfig(
 			Accept: 'application/json',
 			...extraHeaders,
 		},
-		validateStatus: function (status: number) {
-			// Don't throw for non-2xx status, handle it manually
-			return status >= 200 && status < 500;
-		},
+		validateStatus: (status: number) => status >= 200 && status < 500,
 	};
 }
 
@@ -118,13 +120,13 @@ function calculateCRC32CHash(filePath: string): Promise<string> {
  * @returns The ID of the found entity.
  * @throws If no unique entity is found or API error occurs.
  */
-export async function findSealEntityId(
+export async function findSealEntity(
 	apiUrl: string,
 	apiToken: string,
 	prNumber: number,
 	templateId: string,
-): Promise<string> {
-	const functionName = 'findSealEntityId';
+): Promise<SealEntityLite > {
+	const functionName = 'findSealEntity';
 	const searchTerm = `#${prNumber}`;
 	core.info(
 		`[${functionName}] Searching for entity containing "${searchTerm}" with Template ID: ${templateId}`,
@@ -210,13 +212,13 @@ export async function findSealEntityId(
 		);
 	}
 
-	const entityId = matchingEntities[0]?.id;
-	if (!entityId) {
-		core.error(`[${functionName}] Found unique Seal entity ID: ${entityId}`);
-		throw new Error(`Found unique Seal entity ID: ${entityId}`);
+	const entity = matchingEntities[0];
+	if (!entity) {
+		core.error(`[${functionName}] Found unique Seal entity: ${entity}`);
+		throw new Error(`Found unique Seal entity: ${entity}`);
 	}
-	core.info(`[${functionName}] Found unique Seal entity ID: ${entityId}`);
-	return entityId;
+	core.info(`[${functionName}] Found unique Seal entity: ${entity}`);
+	return entity;
 }
 
 /**
@@ -254,9 +256,8 @@ export async function getSealEntityChangeSetIndex(
 			core.error(`[${functionName}] Response Data: ${JSON.stringify(data)}`);
 			// Throw the response status and data from the error object
 			throw new Error(`[${functionName}] API Error: ${status} - ${JSON.stringify(data)}`);
-		} else {
-			throw error; // Re-throw other errors
 		}
+		throw error; 
 	}
 
 	if (response.status !== 200) {
@@ -324,9 +325,8 @@ export async function addEntityToChangeSet(
 			core.error(`[${functionName}] Response Data: ${JSON.stringify(data)}`);
 			// Throw the response status and data from the error object
 			throw new Error(`[${functionName}] API Error: ${status} - ${JSON.stringify(data)}`);
-		} else {
-			throw error; // Re-throw other errors
 		}
+		throw error; 
 	}
 
 	if (response.status !== 200) {
@@ -385,8 +385,8 @@ export async function uploadSealFile(
 			crc32cHash
 		},
 		data: fileStream,
-		maxContentLength: Infinity, // Needed for large file uploads
-		maxBodyLength: Infinity,
+		maxContentLength: Number.POSITIVE_INFINITY, // Needed for large file uploads
+		maxBodyLength: Number.POSITIVE_INFINITY,
 	};
 
 	core.debug(`[${functionName}] Making POST request to ${url} with params: ${JSON.stringify(config.params)}`);
@@ -566,4 +566,58 @@ export async function linkFilesToEntityField(
 			`[${functionName}] Successfully linked ${fileReferences.length} file(s) to Seal entity field "${fieldName}".`,
 		);
 	}
+}
+
+export async function archiveEntities(
+	apiUrl: string,
+	apiToken: string,
+	fileRefs: SealFileReference[] | undefined,
+): Promise<void> {
+	const functionName = 'archiveEntities';
+	if (!fileRefs || fileRefs.length === 0) {
+		core.info(`[${functionName}] No existing file references provided. Skipping archival.`);
+		return;
+	}
+
+	core.info(`[${functionName}] Attempting to archive ${fileRefs.length} existing entity/file reference(s)...`);
+
+	const baseUrl = normalizeApiUrl(apiUrl);
+	const archivePromises = fileRefs.map(async (ref) => {
+		if (!ref?.id) {
+			core.warning(`[${functionName}] Skipping invalid file reference: ${JSON.stringify(ref)}`);
+			return { id: 'invalid', status: 'skipped' };
+		}
+
+		const entityId = ref.id;
+		const url = `${baseUrl}entities/${entityId}/archive`;
+		const config: AxiosRequestConfig = {
+			...createApiConfig(apiToken),
+			method: 'POST',
+			url,
+		};
+
+		core.debug(`[${functionName}] Making POST request to ${url} for entity ID ${entityId}`);
+		try {
+			const response = await axios(config);
+			if (response.status === 200) {
+				core.info(`[${functionName}] Successfully archived entity ID: ${entityId}`);
+				return { id: entityId, status: 'success' };
+			} 
+				core.warning(`[${functionName}] Received non-200 status (${response.status}) attempting to archive entity ID ${entityId}: ${JSON.stringify(response.data)}`);
+				return { id: entityId, status: 'failed', error: `Status ${response.status}` };
+			
+		} catch (error: unknown) {
+			let message = 'Unknown error';
+			if (error instanceof Error) message = error.message;
+			core.error(`[${functionName}] Failed to archive entity ID ${entityId}: ${message}`);
+			if (axios.isAxiosError(error)) {
+				core.error(`[${functionName}] Response Data: ${JSON.stringify(error.response?.data)}`);
+			}
+			return { id: entityId, status: 'failed', error: message };
+		}
+	});
+
+	 await Promise.allSettled(archivePromises);
+
+	 return 
 } 
