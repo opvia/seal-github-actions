@@ -346,6 +346,7 @@ export async function addEntityToChangeSet(
 
 /**
  * Uploads a file to Seal, creating a new file entity.
+ * Uses fetch with HTTP/2 support to handle large file uploads without size limits.
  * @returns The ID of the newly created Seal file entity.
  * @throws If upload fails or API error occurs.
  */
@@ -367,67 +368,71 @@ export async function uploadSealFile(
 	core.info(`[${functionName}] Calculated CRC32C Hash: ${crc32cHash}`);
 
 	const baseUrl = normalizeApiUrl(apiUrl);
-	const url = `${baseUrl}files`;
+	const params = new URLSearchParams({
+		filename: sealFilename,
+		typeTitle: fileTypeTitle,
+		crc32cHash,
+	});
+	const url = `${baseUrl}files?${params.toString()}`;
+
 	const stats = fs.statSync(filePath);
 	const fileSizeInBytes = stats.size;
 	const fileStream = fs.createReadStream(filePath);
 
-	const config: AxiosRequestConfig = {
-		...createApiConfig(apiToken, {
-			'Content-Type': 'application/octet-stream',
-			'Content-Length': fileSizeInBytes.toString(),
-		}),
-		method: 'POST',
-		url,
-		params: {
-			filename: sealFilename,
-			typeTitle: fileTypeTitle,
-			crc32cHash
-		},
-		data: fileStream,
-		maxContentLength: Number.POSITIVE_INFINITY, // Needed for large file uploads
-		maxBodyLength: Number.POSITIVE_INFINITY,
-	};
-
-	core.debug(`[${functionName}] Making POST request to ${url} with params: ${JSON.stringify(config.params)}`);
-	let response: AxiosResponse<SealFileUploadResponse>;
+	core.debug(`[${functionName}] Making POST request to ${url}`);
+	let response: Response;
 	try {
 		const startTime = Date.now();
-		response = await axios(config);
+		response = await fetch(url, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${apiToken.trim()}`,
+				'Content-Type': 'application/octet-stream',
+				'Content-Length': fileSizeInBytes.toString(),
+				'Accept': 'application/json',
+			},
+			body: fileStream as unknown as BodyInit,
+			// @ts-expect-error - duplex is required for streaming but not in TypeScript types yet
+			duplex: 'half',
+		});
 		const requestDuration = Date.now() - startTime;
 		core.info(`[${functionName}] API response status: ${response.status} (${requestDuration}ms)`);
 	} catch (error: unknown) {
-		let message = 'Unknown error';
-		if (error instanceof Error) message = error.message;
-
-		if (axios.isAxiosError(error)) {
-			core.error(`[${functionName}] API request failed: ${message}`);
-			core.error(`[${functionName}] Response Status: ${error.response?.status}`);
-			core.error(`[${functionName}] Response Data: ${JSON.stringify(error.response?.data)}`);
-			message = `Axios error: ${message}`;
-		} else {
-			core.error(`[${functionName}] Non-axios error during request: ${error}`);
-		}
+		const message = error instanceof Error ? error.message : 'Unknown error';
+		core.error(`[${functionName}] API request failed: ${message}`);
 		throw new Error(`Failed to upload file "${sealFilename}" (CRC32C: ${crc32cHash}): ${message}`);
 	}
 
 	// Allow 200 or 201 for creation
 	if (response.status !== 200 && response.status !== 201) {
-		core.error(
-			`[${functionName}] API upload error: ${response.status} ${response.statusText}`,
-		);
-		core.error(`[${functionName}] API upload error body: ${JSON.stringify(response.data)}`);
+		let errorBody = '';
+		try {
+			errorBody = await response.text();
+		} catch {
+			errorBody = 'Unable to read error response';
+		}
+		core.error(`[${functionName}] API upload error: ${response.status} ${response.statusText}`);
+		core.error(`[${functionName}] API upload error body: ${errorBody}`);
 		throw new Error(
-			`Seal API file upload failed with status ${response.status}: ${JSON.stringify(response.data)}`,
+			`Seal API file upload failed with status ${response.status}: ${errorBody}`,
 		);
 	}
 
-	const fileId = response.data?.id;
+	let responseData: SealFileUploadResponse;
+	try {
+		responseData = await response.json() as SealFileUploadResponse;
+	} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : 'Unknown error';
+		core.error(`[${functionName}] Failed to parse response JSON: ${message}`);
+		throw new Error('Failed to parse Seal API upload response');
+	}
+
+	const fileId = responseData?.id;
 	if (!fileId) {
 		core.error(
 			`[${functionName}] File upload succeeded (Status: ${response.status}), but failed to extract file ID from response.`,
 		);
-		core.error(`[${functionName}] Response Body: ${JSON.stringify(response.data)}`);
+		core.error(`[${functionName}] Response Body: ${JSON.stringify(responseData)}`);
 		throw new Error('Missing file ID in Seal API response after upload.');
 	}
 
