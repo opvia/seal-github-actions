@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import * as glob from '@actions/glob';
 import path from 'node:path';
+import pLimit from 'p-limit';
 import {
 	getUploadArtifactsInputs,
 	getPullRequestContext,
@@ -17,6 +18,8 @@ import {
 	findSealEntity, // Import the type if not already exported/imported
 	archiveEntities, // Import the archiveEntities function
 } from '../../common/src/seal-api.js'; // Adjust path
+
+const UPLOAD_CONCURRENCY = 5;
 
 /**
  * Main function for the Upload Artifacts action.
@@ -88,61 +91,78 @@ async function run(): Promise<void> {
 
 		// --- Step 3: Upload Artifacts, Add to Changeset & Collect Refs ---
 		core.startGroup('Processing Artifacts (Upload & Add to Changeset)');
-        const timestamp = new Date().valueOf();
+		const timestamp = new Date().valueOf();
+
+		core.info(`Processing ${foundFiles.length} artifact(s) with concurrency ${UPLOAD_CONCURRENCY}...`);
+
+		const limit = pLimit(UPLOAD_CONCURRENCY);
+
+		const results = await Promise.allSettled(
+			foundFiles.map(filePath =>
+				limit(async (): Promise<SealFileReference> => {
+					const originalFilename = path.basename(filePath);
+					const relativePath = path.relative(prContext.workspace, filePath);
+					const sealFilename = `artifact-${originalFilename}-PR${prContext.prNumber}-${timestamp}`;
+					core.info(`Processing artifact: ${relativePath} -> ${sealFilename}`);
+
+					let fileId: string | null = null;
+
+					try {
+						// 1. Upload the file
+						core.debug(` -> Uploading...`);
+						fileId = await uploadSealFile(
+							inputs.sealApiBaseUrl,
+							inputs.sealApiToken,
+							filePath,
+							sealFilename,
+							inputs.sealFileTypeTitle,
+						);
+						core.debug(` -> Uploaded. File ID: ${fileId}`);
+
+						// 2. Add the uploaded file entity to the changeset
+						core.debug(` -> Adding File ID ${fileId} to Changeset Index ${changeSetIndex}...`);
+						await addEntityToChangeSet(
+							inputs.sealApiBaseUrl,
+							inputs.sealApiToken,
+							fileId,
+							changeSetIndex,
+						);
+						core.debug(` -> Added to changeset.`);
+
+						// 3. Get the file version (needed for linking)
+						core.debug(` -> Getting file version...`);
+						const fileVersion = await getSealFileVersion(
+							inputs.sealApiBaseUrl,
+							inputs.sealApiToken,
+							fileId,
+						);
+						core.debug(` -> File version: ${fileVersion ?? "null"}`);
+
+						core.info(` -> Successfully processed ${sealFilename}. File ID: ${fileId}, Version: ${fileVersion ?? "null"}`);
+						return { id: fileId, version: fileVersion };
+					} catch (error: unknown) {
+						const action = fileId ? "add to changeset or get version" : "upload";
+						const message = error instanceof Error ? error.message : String(error);
+						core.error(`Processing failed for "${relativePath}" during ${action}: ${message}`);
+						throw error;
+					}
+				}),
+			),
+		);
+
+		// Separate successes from failures
 		const uploadedFileRefs: SealFileReference[] = [];
 		let processingFailedCount = 0;
 
-		for (const filePath of foundFiles) {
-			const originalFilename = path.basename(filePath);
-			const relativePath = path.relative(prContext.workspace, filePath);
-			// Construct unique filename for Seal using timestamp
-			const sealFilename = `artifact-${originalFilename}-PR${prContext.prNumber}-${timestamp}`;
-			core.info(`Processing artifact: ${relativePath} -> ${sealFilename}`);
-
-			let fileId: string | null = null; // Keep track of fileId in case changeset add fails
-
-			try {
-				// 1. Upload the file
-				core.debug(` -> Uploading...`);
-				fileId = await uploadSealFile(
-					inputs.sealApiBaseUrl,
-					inputs.sealApiToken,
-					filePath, // Pass absolute path
-					sealFilename,
-					inputs.sealFileTypeTitle,
-				);
-				core.debug(` -> Uploaded. File ID: ${fileId}`);
-
-				// 2. Add the uploaded file entity to the changeset
-				core.debug(` -> Adding File ID ${fileId} to Changeset Index ${changeSetIndex}...`);
-				await addEntityToChangeSet(
-					inputs.sealApiBaseUrl,
-					inputs.sealApiToken,
-					fileId,
-					changeSetIndex,
-				);
-				core.debug(` -> Added to changeset.`);
-
-				// 3. Get the file version (needed for linking)
-				core.debug(` -> Getting file version...`);
-				const fileVersion = await getSealFileVersion(
-					inputs.sealApiBaseUrl,
-					inputs.sealApiToken,
-					fileId,
-				);
-				core.debug(` -> File version: ${fileVersion ?? 'null'}`);
-
-				uploadedFileRefs.push({ id: fileId, version: fileVersion });
-				core.info(` -> Successfully processed ${sealFilename}. File ID: ${fileId}, Version: ${fileVersion ?? 'null'}`);
-
-			} catch (error: unknown) {
+		for (const result of results) {
+			if (result.status === "fulfilled") {
+				uploadedFileRefs.push(result.value);
+			} else {
 				processingFailedCount++;
-				const action = fileId ? 'add to changeset or get version' : 'upload';
-				// Log error but continue processing other files
-				core.error(`Processing failed for "${relativePath}" during ${action}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
-        core.info(`Finished processing. Succeeded: ${uploadedFileRefs.length}, Failed: ${processingFailedCount}.`);
+
+		core.info(`Finished processing. Succeeded: ${uploadedFileRefs.length}, Failed: ${processingFailedCount}.`);
 		core.endGroup();
 
 
