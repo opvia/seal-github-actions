@@ -6,6 +6,7 @@ interface CommonInputs {
 	sealApiToken: string;
 	sealApiBaseUrl: string;
 	sealTemplateId: string;
+	sealSystem: string;
 	sealFileTypeTitle: string; // Has different defaults but is common
 }
 
@@ -54,6 +55,7 @@ export function getCodebaseSnapshotInputs(): CodebaseSnapshotInputs {
 		sealApiToken: core.getInput('seal_api_token', { required: true }),
 		sealApiBaseUrl: core.getInput('seal_api_base_url', { required: true }),
 		sealTemplateId: core.getInput('seal_template_id', { required: true }),
+		sealSystem: core.getInput('seal_system', { required: false }),
 		snapshotFieldName: core.getInput('seal_snapshot_field_name', { required: false }) || 'Code Snapshot', // Default from action.yml
 		sealFileTypeTitle: core.getInput('seal_file_type_title', { required: false }) || 'GitHub Artifacts', // Default from action.yml
 		excludePatterns: core.getInput('exclude_patterns', { required: false }),
@@ -75,6 +77,7 @@ export function getUploadArtifactsInputs(): UploadArtifactsInputs {
 		sealApiToken: core.getInput('seal_api_token', { required: true }),
 		sealApiBaseUrl: core.getInput('seal_api_base_url', { required: true }),
 		sealTemplateId: core.getInput('seal_template_id', { required: true }),
+		sealSystem: core.getInput('seal_system', { required: false }),
 		fieldName: core.getInput('seal_field_name', { required: false }) || 'Release Artifact(s)', // Default from action.yml
 		sealFileTypeTitle: core.getInput('seal_file_type_title', { required: false }) || 'GitHub-Artifacts', // Default from action.yml
 		artifactPatterns: core.getInput('artifact_patterns', { required: true }),
@@ -127,4 +130,4 @@ export function getPullRequestContext(): PullRequestContext | null {
     core.debug(`Full PR Context: ${JSON.stringify(context)}`);
     return context;
 
-} 
+}
