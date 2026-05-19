@@ -166,6 +166,8 @@ async function run(): Promise<void> {
 			inputs.sealApiToken,
 			prContext.prNumber,
 			inputs.sealTemplateId,
+			prContext.repoName,
+			inputs.sealSystem,
 		);
 		const entityId = entity.id;
 		core.endGroup();

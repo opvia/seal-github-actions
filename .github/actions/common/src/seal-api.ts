@@ -46,6 +46,14 @@ interface AddToChangeSetBody {
 	changeSetIndex: string;
 }
 
+interface SealEntitySearchResult {
+	id: string;
+}
+
+interface SealEntitySearchResponse {
+	results: SealEntitySearchResult[];
+}
+
 // --- Helper Functions ---
 
 /**
@@ -116,7 +124,169 @@ function calculateCRC32CHash(filePath: string): Promise<string> {
 // --- API Functions ---
 
 /**
- * Finds a unique Seal entity by PR number within its title and matching template ID.
+ * Finds a unique Seal entity from search results by matching template ID.
+ */
+function findMatchingEntity(
+	searchResults: SealEntityLite[],
+	templateId: string,
+	searchDescription: string,
+): SealEntityLite | null {
+	const matchingEntities = searchResults.filter((entity) => {
+		const matches = entity?.sourceInfo?.template?.id === templateId;
+		core.debug(
+			` -> Entity ${entity.id}: Template ${entity?.sourceInfo?.template?.id} === ${templateId}? ${matches}`,
+		);
+		return matches;
+	});
+
+	if (matchingEntities.length === 0) {
+		core.info(`No entity found matching ${searchDescription} and template ID "${templateId}".`);
+		return null;
+	}
+
+	if (matchingEntities.length > 1) {
+		core.error(
+			`Found multiple entities (${matchingEntities.map((e) => e.id).join(', ')}) matching ${searchDescription}. Cannot proceed.`,
+		);
+		throw new Error(
+			`Found multiple entities matching ${searchDescription} and template ID "${templateId}". Cannot link artifact/snapshot.`,
+		);
+	}
+
+	const entity = matchingEntities[0];
+	if (!entity) {
+		throw new Error(`Found unique Seal entity for ${searchDescription}, but result was empty.`);
+	}
+
+	return entity;
+}
+
+async function getSealEntityDetails(
+	apiUrl: string,
+	apiToken: string,
+	entityId: string,
+): Promise<SealEntityLite> {
+	const functionName = 'getSealEntityDetails';
+	const baseUrl = normalizeApiUrl(apiUrl);
+	const url = `${baseUrl}entities/${entityId}`;
+	const config: AxiosRequestConfig = {
+		...createApiConfig(apiToken),
+		method: 'GET',
+		url,
+	};
+
+	core.debug(`[${functionName}] Fetching entity details for ${entityId}`);
+	const response: AxiosResponse<SealEntityLite> = await axios(config);
+
+	if (response.status !== 200) {
+		core.error(
+			`[${functionName}] API error getting entity: ${response.status} ${response.statusText}`,
+		);
+		core.error(`[${functionName}] API error body: ${JSON.stringify(response.data)}`);
+		throw new Error(
+			`Seal API entity details failed with status ${response.status}: ${JSON.stringify(response.data)}`,
+		);
+	}
+
+	return response.data;
+}
+
+/**
+ * Finds a Seal entity by PR metadata fields. This searches DRAFT data so it can
+ * find newly-created change controls before they have been published.
+ */
+async function findSealEntityByPrFields(
+	apiUrl: string,
+	apiToken: string,
+	prNumber: number,
+	repoName: string,
+	templateId: string,
+	systemSlug: string,
+): Promise<SealEntityLite | null> {
+	const functionName = 'findSealEntityByPrFields';
+	const baseUrl = normalizeApiUrl(apiUrl);
+	const url = `${baseUrl}v2/entities/search`;
+	const config: AxiosRequestConfig = {
+		...createApiConfig(apiToken),
+		method: 'POST',
+		url,
+		params: systemSlug ? { system: systemSlug } : undefined,
+		data: {
+			searchType: 'DRAFT',
+			limit: 25,
+			filters: {
+				and: [
+					{
+						filter: 'fieldValue',
+						operator: 'in',
+						value: [{ name: 'PR Number', operator: '=', value: String(prNumber) }],
+					},
+					{
+						filter: 'fieldValue',
+						operator: 'in',
+						value: [{ name: 'Repository Name', operator: '=', value: repoName }],
+					},
+				],
+			},
+		},
+	};
+
+	core.info(
+		`[${functionName}] Searching for PR #${prNumber} in repo "${repoName}" with Template ID: ${templateId}`,
+	);
+
+	let response: AxiosResponse<SealEntitySearchResponse>;
+	try {
+		const startTime = Date.now();
+		response = await axios(config);
+		const requestDuration = Date.now() - startTime;
+		core.info(`[${functionName}] API response status: ${response.status} (${requestDuration}ms)`);
+	} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : 'Unknown error';
+		if (axios.isAxiosError(error)) {
+			core.error(`[${functionName}] API request failed: ${message}`);
+			core.error(`[${functionName}] Response Data: ${JSON.stringify(error.response?.data)}`);
+			throw new Error(`Failed to search for Seal entity by PR fields: Axios error: ${message}`);
+		}
+		core.error(`[${functionName}] Non-axios error during request: ${error}`);
+		throw new Error(`Failed to search for Seal entity by PR fields: ${message}`);
+	}
+
+	if (response.status !== 200) {
+		core.error(
+			`[${functionName}] API search error: ${response.status} ${response.statusText}`,
+		);
+		core.error(`[${functionName}] API search error body: ${JSON.stringify(response.data)}`);
+		throw new Error(
+			`Seal API field search failed with status ${response.status}: ${JSON.stringify(response.data)}`,
+		);
+	}
+
+	const searchResults = response.data.results;
+	core.debug(
+		`[${functionName}] Raw search results count: ${searchResults?.length ?? 0}`,
+	);
+
+	if (!Array.isArray(searchResults)) {
+		core.error(`[${functionName}] API search response did not include a results array.`);
+		throw new Error('Invalid response format from Seal API v2 search.');
+	}
+
+	const entities = await Promise.all(
+		searchResults.map((result) =>
+			getSealEntityDetails(apiUrl, apiToken, result.id),
+		),
+	);
+
+	return findMatchingEntity(
+		entities,
+		templateId,
+		`PR Number "${prNumber}" and Repository Name "${repoName}"`,
+	);
+}
+
+/**
+ * Finds a unique Seal entity by PR fields, falling back to PR number within title.
  * @returns The ID of the found entity.
  * @throws If no unique entity is found or API error occurs.
  */
@@ -125,16 +295,33 @@ export async function findSealEntity(
 	apiToken: string,
 	prNumber: number,
 	templateId: string,
+	repoName: string,
+	systemSlug: string,
 ): Promise<SealEntityLite > {
 	const functionName = 'findSealEntity';
 	const searchTerm = `#${prNumber}`;
 	core.info(
-		`[${functionName}] Searching for entity containing "${searchTerm}" with Template ID: ${templateId}`,
+		`[${functionName}] Searching for entity for PR #${prNumber} in repo "${repoName}" with Template ID: ${templateId}`,
 	);
 
 	if (!templateId) {
 		throw new Error('Seal Template ID is required for filtering search results.');
 	}
+
+	const fieldMatch = await findSealEntityByPrFields(
+		apiUrl,
+		apiToken,
+		prNumber,
+		repoName,
+		templateId,
+		systemSlug,
+	);
+	if (fieldMatch) {
+		core.info(`[${functionName}] Found unique Seal entity by PR fields: ${fieldMatch.id}`);
+		return fieldMatch;
+	}
+
+	core.info(`[${functionName}] Falling back to title search for "${searchTerm}".`);
 
 	const baseUrl = normalizeApiUrl(apiUrl);
 	const url = `${baseUrl}entities/search`;
@@ -142,7 +329,7 @@ export async function findSealEntity(
 		...createApiConfig(apiToken),
 		method: 'GET',
 		url,
-		params: { titleContains: searchTerm },
+		params: { titleContains: searchTerm, ...(systemSlug ? { system: systemSlug } : {}) },
 	};
 
 	core.debug(`[${functionName}] Making GET request to ${url} with query ${searchTerm}`);
@@ -186,15 +373,13 @@ export async function findSealEntity(
 		throw new Error('Invalid response format from Seal API search.');
 	}
 
-	const matchingEntities = searchResults.filter((entity) => {
-		const matches = entity?.sourceInfo?.template?.id === templateId;
-		core.debug(
-			` -> Entity ${entity.id}: Template ${entity?.sourceInfo?.template?.id} === ${templateId}? ${matches}`,
-		);
-		return matches;
-	});
+	const matchingEntity = findMatchingEntity(
+		searchResults,
+		templateId,
+		`title "${searchTerm}"`,
+	);
 
-	if (matchingEntities.length === 0) {
+	if (!matchingEntity) {
 		core.error(
 			`[${functionName}] No entity found matching title "${searchTerm}" and template ID "${templateId}".`,
 		);
@@ -203,22 +388,8 @@ export async function findSealEntity(
 		);
 	}
 
-	if (matchingEntities.length > 1) {
-		core.error(
-			`[${functionName}] Found multiple entities (${matchingEntities.map((e) => e.id).join(', ')}) matching criteria. Cannot proceed.`,
-		);
-		throw new Error(
-			`Found multiple entities matching title "${searchTerm}" and template ID "${templateId}". Cannot link artifact/snapshot.`,
-		);
-	}
-
-	const entity = matchingEntities[0];
-	if (!entity) {
-		core.error(`[${functionName}] Found unique Seal entity: ${entity}`);
-		throw new Error(`Found unique Seal entity: ${entity}`);
-	}
-	core.info(`[${functionName}] Found unique Seal entity: ${entity}`);
-	return entity;
+	core.info(`[${functionName}] Found unique Seal entity: ${matchingEntity.id}`);
+	return matchingEntity;
 }
 
 /**
@@ -625,4 +796,4 @@ export async function archiveEntities(
 	 await Promise.allSettled(archivePromises);
 
 	 return 
-} 
+}

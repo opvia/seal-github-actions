@@ -25,6 +25,7 @@ This action captures a snapshot of the repository's codebase at the time a pull 
 *   `seal_api_token` (required): Seal API Token. Use `${{ secrets.SEAL_API_TOKEN }}`.
 *   `seal_api_base_url` (required): Seal API Base URL (e.g., `https://us.backend.seal.run/api/`).
 *   `seal_template_id` (required): Seal Template ID for the target change control entity.
+*   `seal_system` (optional): Seal system slug for the target change control entity. Leave unset to search all systems visible to the API token.
 *   `seal_snapshot_field_name` (optional, default: `Code Snapshot`): Name of the reference field in the Seal entity to link the snapshot.
 *   `seal_file_type_title` (optional, default: `GitHub Artifacts`): Title for the uploaded file type in Seal.
 *   `exclude_patterns` (optional): Space-separated glob patterns to exclude from the archive (e.g., `.git/* node_modules/*`).
@@ -49,6 +50,7 @@ This action finds specific files (artifacts) within the repository based on patt
 *   `seal_api_token` (required): Seal API Token. Use `${{ secrets.SEAL_API_TOKEN }}`.
 *   `seal_api_base_url` (required): Seal API Base URL (e.g., `https://us.backend.seal.run/api/`).
 *   `seal_template_id` (required): Seal Template ID for the target change control entity.
+*   `seal_system` (optional): Seal system slug for the target change control entity. Leave unset to search all systems visible to the API token.
 *   `artifact_patterns` (required): Space-separated glob patterns matching the artifacts to upload (e.g., `"dist/**/*.js" "docs/*.pdf"`). Use quotes if patterns contain spaces or special characters.
 *   `seal_field_name` (optional, default: `Release Artifact(s)`): Name of the reference field in the Seal entity to link the artifacts.
 *   `seal_file_type_title` (optional, default: `GitHub-Artifacts`): Title for the uploaded file type in Seal.

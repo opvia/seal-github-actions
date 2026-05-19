@@ -11156,7 +11156,7 @@ module.exports = function () {
 /***/ 1573:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-var url = __nccwpck_require__(4635);
+var url = __nccwpck_require__(7016);
 var URL = url.URL;
 var http = __nccwpck_require__(8611);
 var https = __nccwpck_require__(5692);
@@ -11854,7 +11854,7 @@ var util = __nccwpck_require__(9023);
 var path = __nccwpck_require__(6928);
 var http = __nccwpck_require__(8611);
 var https = __nccwpck_require__(5692);
-var parseUrl = (__nccwpck_require__(4635).parse);
+var parseUrl = (__nccwpck_require__(7016).parse);
 var fs = __nccwpck_require__(9896);
 var Stream = (__nccwpck_require__(2203).Stream);
 var mime = __nccwpck_require__(4096);
@@ -14558,7 +14558,7 @@ function onceStrict (fn) {
 
 
 
-var parseUrl = (__nccwpck_require__(4635).parse);
+var parseUrl = (__nccwpck_require__(7016).parse);
 
 var DEFAULT_PORTS = {
   ftp: 21,
@@ -35378,7 +35378,7 @@ module.exports = Pool
 
 
 const { kProxy, kClose, kDestroy, kInterceptors } = __nccwpck_require__(6443)
-const { URL } = __nccwpck_require__(4635)
+const { URL } = __nccwpck_require__(7016)
 const Agent = __nccwpck_require__(9965)
 const Pool = __nccwpck_require__(5076)
 const DispatcherBase = __nccwpck_require__(1)
@@ -37897,7 +37897,7 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("tty");
 
 /***/ }),
 
-/***/ 4635:
+/***/ 7016:
 /***/ ((module) => {
 
 module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("url");
@@ -39650,6 +39650,227 @@ var glob = __nccwpck_require__(7206);
 ;// CONCATENATED MODULE: external "node:path"
 const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
 var external_node_path_default = /*#__PURE__*/__nccwpck_require__.n(external_node_path_namespaceObject);
+;// CONCATENATED MODULE: ./node_modules/yocto-queue/index.js
+/*
+How it works:
+`this.#head` is an instance of `Node` which keeps track of its current value and nests another instance of `Node` that keeps the value that comes after it. When a value is provided to `.enqueue()`, the code needs to iterate through `this.#head`, going deeper and deeper to find the last value. However, iterating through every single item is slow. This problem is solved by saving a reference to the last value as `this.#tail` so that it can reference it to add a new value.
+*/
+
+class Node {
+	value;
+	next;
+
+	constructor(value) {
+		this.value = value;
+	}
+}
+
+class Queue {
+	#head;
+	#tail;
+	#size;
+
+	constructor() {
+		this.clear();
+	}
+
+	enqueue(value) {
+		const node = new Node(value);
+
+		if (this.#head) {
+			this.#tail.next = node;
+			this.#tail = node;
+		} else {
+			this.#head = node;
+			this.#tail = node;
+		}
+
+		this.#size++;
+	}
+
+	dequeue() {
+		const current = this.#head;
+		if (!current) {
+			return;
+		}
+
+		this.#head = this.#head.next;
+		this.#size--;
+
+		// Clean up tail reference when queue becomes empty
+		if (!this.#head) {
+			this.#tail = undefined;
+		}
+
+		return current.value;
+	}
+
+	peek() {
+		if (!this.#head) {
+			return;
+		}
+
+		return this.#head.value;
+
+		// TODO: Node.js 18.
+		// return this.#head?.value;
+	}
+
+	clear() {
+		this.#head = undefined;
+		this.#tail = undefined;
+		this.#size = 0;
+	}
+
+	get size() {
+		return this.#size;
+	}
+
+	* [Symbol.iterator]() {
+		let current = this.#head;
+
+		while (current) {
+			yield current.value;
+			current = current.next;
+		}
+	}
+
+	* drain() {
+		while (this.#head) {
+			yield this.dequeue();
+		}
+	}
+}
+
+;// CONCATENATED MODULE: ./node_modules/p-limit/index.js
+
+
+function pLimit(concurrency) {
+	let rejectOnClear = false;
+
+	if (typeof concurrency === 'object') {
+		({concurrency, rejectOnClear = false} = concurrency);
+	}
+
+	validateConcurrency(concurrency);
+
+	if (typeof rejectOnClear !== 'boolean') {
+		throw new TypeError('Expected `rejectOnClear` to be a boolean');
+	}
+
+	const queue = new Queue();
+	let activeCount = 0;
+
+	const resumeNext = () => {
+		// Process the next queued function if we're under the concurrency limit
+		if (activeCount < concurrency && queue.size > 0) {
+			activeCount++;
+			queue.dequeue().run();
+		}
+	};
+
+	const next = () => {
+		activeCount--;
+		resumeNext();
+	};
+
+	const run = async (function_, resolve, arguments_) => {
+		// Execute the function and capture the result promise
+		const result = (async () => function_(...arguments_))();
+
+		// Resolve immediately with the promise (don't wait for completion)
+		resolve(result);
+
+		// Wait for the function to complete (success or failure)
+		// We catch errors here to prevent unhandled rejections,
+		// but the original promise rejection is preserved for the caller
+		try {
+			await result;
+		} catch {}
+
+		// Decrement active count and process next queued function
+		next();
+	};
+
+	const enqueue = (function_, resolve, reject, arguments_) => {
+		const queueItem = {reject};
+
+		// Queue the internal resolve function instead of the run function
+		// to preserve the asynchronous execution context.
+		new Promise(internalResolve => { // eslint-disable-line promise/param-names
+			queueItem.run = internalResolve;
+			queue.enqueue(queueItem);
+		}).then(run.bind(undefined, function_, resolve, arguments_)); // eslint-disable-line promise/prefer-await-to-then
+
+		// Start processing immediately if we haven't reached the concurrency limit
+		if (activeCount < concurrency) {
+			resumeNext();
+		}
+	};
+
+	const generator = (function_, ...arguments_) => new Promise((resolve, reject) => {
+		enqueue(function_, resolve, reject, arguments_);
+	});
+
+	Object.defineProperties(generator, {
+		activeCount: {
+			get: () => activeCount,
+		},
+		pendingCount: {
+			get: () => queue.size,
+		},
+		clearQueue: {
+			value() {
+				if (!rejectOnClear) {
+					queue.clear();
+					return;
+				}
+
+				const abortError = AbortSignal.abort().reason;
+
+				while (queue.size > 0) {
+					queue.dequeue().reject(abortError);
+				}
+			},
+		},
+		concurrency: {
+			get: () => concurrency,
+
+			set(newConcurrency) {
+				validateConcurrency(newConcurrency);
+				concurrency = newConcurrency;
+
+				queueMicrotask(() => {
+					// eslint-disable-next-line no-unmodified-loop-condition
+					while (activeCount < concurrency && queue.size > 0) {
+						resumeNext();
+					}
+				});
+			},
+		},
+		map: {
+			async value(iterable, function_) {
+				const promises = Array.from(iterable, (value, index) => this(function_, value, index));
+				return Promise.all(promises);
+			},
+		},
+	});
+
+	return generator;
+}
+
+function limitFunction(function_, options) {
+	const limit = pLimit(options);
+
+	return (...arguments_) => limit(() => function_(...arguments_));
+}
+
+function validateConcurrency(concurrency) {
+	if (!((Number.isInteger(concurrency) || concurrency === Number.POSITIVE_INFINITY) && concurrency > 0)) {
+		throw new TypeError('Expected `concurrency` to be a number from 1 and up');
+	}
+}
+
 // EXTERNAL MODULE: ./node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(3228);
 ;// CONCATENATED MODULE: ./common/src/github-context.ts
@@ -39671,6 +39892,7 @@ function getCodebaseSnapshotInputs() {
         sealApiToken: core.getInput('seal_api_token', { required: true }),
         sealApiBaseUrl: core.getInput('seal_api_base_url', { required: true }),
         sealTemplateId: core.getInput('seal_template_id', { required: true }),
+        sealSystem: core.getInput('seal_system', { required: false }),
         snapshotFieldName: core.getInput('seal_snapshot_field_name', { required: false }) || 'Code Snapshot', // Default from action.yml
         sealFileTypeTitle: core.getInput('seal_file_type_title', { required: false }) || 'GitHub Artifacts', // Default from action.yml
         excludePatterns: core.getInput('exclude_patterns', { required: false }),
@@ -39689,6 +39911,7 @@ function getUploadArtifactsInputs() {
         sealApiToken: lib_core.getInput('seal_api_token', { required: true }),
         sealApiBaseUrl: lib_core.getInput('seal_api_base_url', { required: true }),
         sealTemplateId: lib_core.getInput('seal_template_id', { required: true }),
+        sealSystem: lib_core.getInput('seal_system', { required: false }),
         fieldName: lib_core.getInput('seal_field_name', { required: false }) || 'Release Artifact(s)', // Default from action.yml
         sealFileTypeTitle: lib_core.getInput('seal_file_type_title', { required: false }) || 'GitHub-Artifacts', // Default from action.yml
         artifactPatterns: lib_core.getInput('artifact_patterns', { required: true }),
@@ -41039,12 +41262,12 @@ class InterceptorManager {
 // EXTERNAL MODULE: external "crypto"
 var external_crypto_ = __nccwpck_require__(6982);
 // EXTERNAL MODULE: external "url"
-var external_url_ = __nccwpck_require__(4635);
+var external_url_ = __nccwpck_require__(7016);
 ;// CONCATENATED MODULE: ./node_modules/axios/lib/platform/node/classes/URLSearchParams.js
 
 
 
-/* harmony default export */ const src_URLSearchParams = (external_url_.URLSearchParams);
+/* harmony default export */ const classes_URLSearchParams = (external_url_.URLSearchParams);
 
 ;// CONCATENATED MODULE: ./node_modules/axios/lib/platform/node/index.js
 
@@ -41077,7 +41300,7 @@ const generateString = (size = 16, alphabet = ALPHABET.ALPHA_DIGIT) => {
 /* harmony default export */ const node = ({
   isNode: true,
   classes: {
-    URLSearchParams: src_URLSearchParams,
+    URLSearchParams: classes_URLSearchParams,
     FormData: classes_FormData,
     Blob: typeof Blob !== 'undefined' && Blob || null
   },
@@ -44918,24 +45141,135 @@ function calculateCRC32CHash(filePath) {
 }
 // --- API Functions ---
 /**
- * Finds a unique Seal entity by PR number within its title and matching template ID.
+ * Finds a unique Seal entity from search results by matching template ID.
+ */
+function findMatchingEntity(searchResults, templateId, searchDescription) {
+    const matchingEntities = searchResults.filter((entity) => {
+        const matches = entity?.sourceInfo?.template?.id === templateId;
+        lib_core.debug(` -> Entity ${entity.id}: Template ${entity?.sourceInfo?.template?.id} === ${templateId}? ${matches}`);
+        return matches;
+    });
+    if (matchingEntities.length === 0) {
+        lib_core.info(`No entity found matching ${searchDescription} and template ID "${templateId}".`);
+        return null;
+    }
+    if (matchingEntities.length > 1) {
+        lib_core.error(`Found multiple entities (${matchingEntities.map((e) => e.id).join(', ')}) matching ${searchDescription}. Cannot proceed.`);
+        throw new Error(`Found multiple entities matching ${searchDescription} and template ID "${templateId}". Cannot link artifact/snapshot.`);
+    }
+    const entity = matchingEntities[0];
+    if (!entity) {
+        throw new Error(`Found unique Seal entity for ${searchDescription}, but result was empty.`);
+    }
+    return entity;
+}
+async function getSealEntityDetails(apiUrl, apiToken, entityId) {
+    const functionName = 'getSealEntityDetails';
+    const baseUrl = normalizeApiUrl(apiUrl);
+    const url = `${baseUrl}entities/${entityId}`;
+    const config = {
+        ...createApiConfig(apiToken),
+        method: 'GET',
+        url,
+    };
+    lib_core.debug(`[${functionName}] Fetching entity details for ${entityId}`);
+    const response = await lib_axios(config);
+    if (response.status !== 200) {
+        lib_core.error(`[${functionName}] API error getting entity: ${response.status} ${response.statusText}`);
+        lib_core.error(`[${functionName}] API error body: ${JSON.stringify(response.data)}`);
+        throw new Error(`Seal API entity details failed with status ${response.status}: ${JSON.stringify(response.data)}`);
+    }
+    return response.data;
+}
+/**
+ * Finds a Seal entity by PR metadata fields. This searches DRAFT data so it can
+ * find newly-created change controls before they have been published.
+ */
+async function findSealEntityByPrFields(apiUrl, apiToken, prNumber, repoName, templateId, systemSlug) {
+    const functionName = 'findSealEntityByPrFields';
+    const baseUrl = normalizeApiUrl(apiUrl);
+    const url = `${baseUrl}v2/entities/search`;
+    const config = {
+        ...createApiConfig(apiToken),
+        method: 'POST',
+        url,
+        params: systemSlug ? { system: systemSlug } : undefined,
+        data: {
+            searchType: 'DRAFT',
+            limit: 25,
+            filters: {
+                and: [
+                    {
+                        filter: 'fieldValue',
+                        operator: 'in',
+                        value: [{ name: 'PR Number', operator: '=', value: String(prNumber) }],
+                    },
+                    {
+                        filter: 'fieldValue',
+                        operator: 'in',
+                        value: [{ name: 'Repository Name', operator: '=', value: repoName }],
+                    },
+                ],
+            },
+        },
+    };
+    lib_core.info(`[${functionName}] Searching for PR #${prNumber} in repo "${repoName}" with Template ID: ${templateId}`);
+    let response;
+    try {
+        const startTime = Date.now();
+        response = await lib_axios(config);
+        const requestDuration = Date.now() - startTime;
+        lib_core.info(`[${functionName}] API response status: ${response.status} (${requestDuration}ms)`);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        if (lib_axios.isAxiosError(error)) {
+            lib_core.error(`[${functionName}] API request failed: ${message}`);
+            lib_core.error(`[${functionName}] Response Data: ${JSON.stringify(error.response?.data)}`);
+            throw new Error(`Failed to search for Seal entity by PR fields: Axios error: ${message}`);
+        }
+        lib_core.error(`[${functionName}] Non-axios error during request: ${error}`);
+        throw new Error(`Failed to search for Seal entity by PR fields: ${message}`);
+    }
+    if (response.status !== 200) {
+        lib_core.error(`[${functionName}] API search error: ${response.status} ${response.statusText}`);
+        lib_core.error(`[${functionName}] API search error body: ${JSON.stringify(response.data)}`);
+        throw new Error(`Seal API field search failed with status ${response.status}: ${JSON.stringify(response.data)}`);
+    }
+    const searchResults = response.data.results;
+    lib_core.debug(`[${functionName}] Raw search results count: ${searchResults?.length ?? 0}`);
+    if (!Array.isArray(searchResults)) {
+        lib_core.error(`[${functionName}] API search response did not include a results array.`);
+        throw new Error('Invalid response format from Seal API v2 search.');
+    }
+    const entities = await Promise.all(searchResults.map((result) => getSealEntityDetails(apiUrl, apiToken, result.id)));
+    return findMatchingEntity(entities, templateId, `PR Number "${prNumber}" and Repository Name "${repoName}"`);
+}
+/**
+ * Finds a unique Seal entity by PR fields, falling back to PR number within title.
  * @returns The ID of the found entity.
  * @throws If no unique entity is found or API error occurs.
  */
-async function findSealEntity(apiUrl, apiToken, prNumber, templateId) {
+async function findSealEntity(apiUrl, apiToken, prNumber, templateId, repoName, systemSlug) {
     const functionName = 'findSealEntity';
     const searchTerm = `#${prNumber}`;
-    lib_core.info(`[${functionName}] Searching for entity containing "${searchTerm}" with Template ID: ${templateId}`);
+    lib_core.info(`[${functionName}] Searching for entity for PR #${prNumber} in repo "${repoName}" with Template ID: ${templateId}`);
     if (!templateId) {
         throw new Error('Seal Template ID is required for filtering search results.');
     }
+    const fieldMatch = await findSealEntityByPrFields(apiUrl, apiToken, prNumber, repoName, templateId, systemSlug);
+    if (fieldMatch) {
+        lib_core.info(`[${functionName}] Found unique Seal entity by PR fields: ${fieldMatch.id}`);
+        return fieldMatch;
+    }
+    lib_core.info(`[${functionName}] Falling back to title search for "${searchTerm}".`);
     const baseUrl = normalizeApiUrl(apiUrl);
     const url = `${baseUrl}entities/search`;
     const config = {
         ...createApiConfig(apiToken),
         method: 'GET',
         url,
-        params: { titleContains: searchTerm },
+        params: { titleContains: searchTerm, ...(systemSlug ? { system: systemSlug } : {}) },
     };
     lib_core.debug(`[${functionName}] Making GET request to ${url} with query ${searchTerm}`);
     let response;
@@ -44970,26 +45304,13 @@ async function findSealEntity(apiUrl, apiToken, prNumber, templateId) {
         lib_core.error(`[${functionName}] API search response was not an array.`);
         throw new Error('Invalid response format from Seal API search.');
     }
-    const matchingEntities = searchResults.filter((entity) => {
-        const matches = entity?.sourceInfo?.template?.id === templateId;
-        lib_core.debug(` -> Entity ${entity.id}: Template ${entity?.sourceInfo?.template?.id} === ${templateId}? ${matches}`);
-        return matches;
-    });
-    if (matchingEntities.length === 0) {
+    const matchingEntity = findMatchingEntity(searchResults, templateId, `title "${searchTerm}"`);
+    if (!matchingEntity) {
         lib_core.error(`[${functionName}] No entity found matching title "${searchTerm}" and template ID "${templateId}".`);
         throw new Error(`No Seal entity found matching title "${searchTerm}" and template ID "${templateId}".`);
     }
-    if (matchingEntities.length > 1) {
-        lib_core.error(`[${functionName}] Found multiple entities (${matchingEntities.map((e) => e.id).join(', ')}) matching criteria. Cannot proceed.`);
-        throw new Error(`Found multiple entities matching title "${searchTerm}" and template ID "${templateId}". Cannot link artifact/snapshot.`);
-    }
-    const entity = matchingEntities[0];
-    if (!entity) {
-        lib_core.error(`[${functionName}] Found unique Seal entity: ${entity}`);
-        throw new Error(`Found unique Seal entity: ${entity}`);
-    }
-    lib_core.info(`[${functionName}] Found unique Seal entity: ${entity}`);
-    return entity;
+    lib_core.info(`[${functionName}] Found unique Seal entity: ${matchingEntity.id}`);
+    return matchingEntity;
 }
 /**
  * Retrieves the index of the changeset associated with a given Seal entity.
@@ -45082,6 +45403,7 @@ async function addEntityToChangeSet(apiUrl, apiToken, entityIdToAdd, changeSetIn
 }
 /**
  * Uploads a file to Seal, creating a new file entity.
+ * Uses fetch with HTTP/2 support to handle large file uploads without size limits.
  * @returns The ID of the newly created Seal file entity.
  * @throws If upload fails or API error occurs.
  */
@@ -45093,59 +45415,65 @@ async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileType
     const crc32cHash = await calculateCRC32CHash(filePath);
     lib_core.info(`[${functionName}] Calculated CRC32C Hash: ${crc32cHash}`);
     const baseUrl = normalizeApiUrl(apiUrl);
-    const url = `${baseUrl}files`;
+    const params = new URLSearchParams({
+        filename: sealFilename,
+        typeTitle: fileTypeTitle,
+        crc32cHash,
+    });
+    const url = `${baseUrl}files?${params.toString()}`;
     const stats = external_node_fs_default().statSync(filePath);
     const fileSizeInBytes = stats.size;
     const fileStream = external_node_fs_default().createReadStream(filePath);
-    const config = {
-        ...createApiConfig(apiToken, {
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': fileSizeInBytes.toString(),
-        }),
-        method: 'POST',
-        url,
-        params: {
-            filename: sealFilename,
-            typeTitle: fileTypeTitle,
-            crc32cHash
-        },
-        data: fileStream,
-        maxContentLength: Number.POSITIVE_INFINITY, // Needed for large file uploads
-        maxBodyLength: Number.POSITIVE_INFINITY,
-    };
-    lib_core.debug(`[${functionName}] Making POST request to ${url} with params: ${JSON.stringify(config.params)}`);
+    lib_core.debug(`[${functionName}] Making POST request to ${url}`);
     let response;
     try {
         const startTime = Date.now();
-        response = await lib_axios(config);
+        response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiToken.trim()}`,
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': fileSizeInBytes.toString(),
+                'Accept': 'application/json',
+            },
+            body: fileStream,
+            // @ts-expect-error - duplex is required for streaming but not in TypeScript types yet
+            duplex: 'half',
+        });
         const requestDuration = Date.now() - startTime;
         lib_core.info(`[${functionName}] API response status: ${response.status} (${requestDuration}ms)`);
     }
     catch (error) {
-        let message = 'Unknown error';
-        if (error instanceof Error)
-            message = error.message;
-        if (lib_axios.isAxiosError(error)) {
-            lib_core.error(`[${functionName}] API request failed: ${message}`);
-            lib_core.error(`[${functionName}] Response Status: ${error.response?.status}`);
-            lib_core.error(`[${functionName}] Response Data: ${JSON.stringify(error.response?.data)}`);
-            message = `Axios error: ${message}`;
-        }
-        else {
-            lib_core.error(`[${functionName}] Non-axios error during request: ${error}`);
-        }
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        lib_core.error(`[${functionName}] API request failed: ${message}`);
         throw new Error(`Failed to upload file "${sealFilename}" (CRC32C: ${crc32cHash}): ${message}`);
     }
     // Allow 200 or 201 for creation
     if (response.status !== 200 && response.status !== 201) {
+        let errorBody = '';
+        try {
+            errorBody = await response.text();
+        }
+        catch {
+            errorBody = 'Unable to read error response';
+        }
         lib_core.error(`[${functionName}] API upload error: ${response.status} ${response.statusText}`);
-        lib_core.error(`[${functionName}] API upload error body: ${JSON.stringify(response.data)}`);
-        throw new Error(`Seal API file upload failed with status ${response.status}: ${JSON.stringify(response.data)}`);
+        lib_core.error(`[${functionName}] API upload error body: ${errorBody}`);
+        throw new Error(`Seal API file upload failed with status ${response.status}: ${errorBody}`);
     }
-    const fileId = response.data?.id;
+    let responseData;
+    try {
+        responseData = await response.json();
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        lib_core.error(`[${functionName}] Failed to parse response JSON: ${message}`);
+        throw new Error('Failed to parse Seal API upload response');
+    }
+    const fileId = responseData?.id;
     if (!fileId) {
         lib_core.error(`[${functionName}] File upload succeeded (Status: ${response.status}), but failed to extract file ID from response.`);
-        lib_core.error(`[${functionName}] Response Body: ${JSON.stringify(response.data)}`);
+        lib_core.error(`[${functionName}] Response Body: ${JSON.stringify(responseData)}`);
         throw new Error('Missing file ID in Seal API response after upload.');
     }
     lib_core.info(`[${functionName}] Successfully uploaded file. File Entity ID: ${fileId}`);
@@ -45302,8 +45630,10 @@ async function archiveEntities(apiUrl, apiToken, fileRefs) {
 
 
 
+
  // Adjust path as needed if compiled differently
  // Adjust path
+const UPLOAD_CONCURRENCY = 5;
 /**
  * Main function for the Upload Artifacts action.
  */
@@ -45349,7 +45679,7 @@ async function run() {
         lib_core.endGroup();
         // --- Step 2: Find Target Seal Entity ---
         lib_core.startGroup('Finding Seal Entity');
-        const entity = await findSealEntity(inputs.sealApiBaseUrl, inputs.sealApiToken, prContext.prNumber, inputs.sealTemplateId);
+        const entity = await findSealEntity(inputs.sealApiBaseUrl, inputs.sealApiToken, prContext.prNumber, inputs.sealTemplateId, prContext.repoName, inputs.sealSystem);
         const entityId = entity.id;
         lib_core.endGroup();
         // --- Step 2b: Get Changeset Index for the Target Entity ---
@@ -45359,20 +45689,18 @@ async function run() {
         // --- Step 3: Upload Artifacts, Add to Changeset & Collect Refs ---
         lib_core.startGroup('Processing Artifacts (Upload & Add to Changeset)');
         const timestamp = new Date().valueOf();
-        const uploadedFileRefs = [];
-        let processingFailedCount = 0;
-        for (const filePath of foundFiles) {
+        lib_core.info(`Processing ${foundFiles.length} artifact(s) with concurrency ${UPLOAD_CONCURRENCY}...`);
+        const limit = pLimit(UPLOAD_CONCURRENCY);
+        const results = await Promise.allSettled(foundFiles.map(filePath => limit(async () => {
             const originalFilename = external_node_path_default().basename(filePath);
             const relativePath = external_node_path_default().relative(prContext.workspace, filePath);
-            // Construct unique filename for Seal using timestamp
             const sealFilename = `artifact-${originalFilename}-PR${prContext.prNumber}-${timestamp}`;
             lib_core.info(`Processing artifact: ${relativePath} -> ${sealFilename}`);
-            let fileId = null; // Keep track of fileId in case changeset add fails
+            let fileId = null;
             try {
                 // 1. Upload the file
                 lib_core.debug(` -> Uploading...`);
-                fileId = await uploadSealFile(inputs.sealApiBaseUrl, inputs.sealApiToken, filePath, // Pass absolute path
-                sealFilename, inputs.sealFileTypeTitle);
+                fileId = await uploadSealFile(inputs.sealApiBaseUrl, inputs.sealApiToken, filePath, sealFilename, inputs.sealFileTypeTitle);
                 lib_core.debug(` -> Uploaded. File ID: ${fileId}`);
                 // 2. Add the uploaded file entity to the changeset
                 lib_core.debug(` -> Adding File ID ${fileId} to Changeset Index ${changeSetIndex}...`);
@@ -45381,15 +45709,26 @@ async function run() {
                 // 3. Get the file version (needed for linking)
                 lib_core.debug(` -> Getting file version...`);
                 const fileVersion = await getSealFileVersion(inputs.sealApiBaseUrl, inputs.sealApiToken, fileId);
-                lib_core.debug(` -> File version: ${fileVersion ?? 'null'}`);
-                uploadedFileRefs.push({ id: fileId, version: fileVersion });
-                lib_core.info(` -> Successfully processed ${sealFilename}. File ID: ${fileId}, Version: ${fileVersion ?? 'null'}`);
+                lib_core.debug(` -> File version: ${fileVersion ?? "null"}`);
+                lib_core.info(` -> Successfully processed ${sealFilename}. File ID: ${fileId}, Version: ${fileVersion ?? "null"}`);
+                return { id: fileId, version: fileVersion };
             }
             catch (error) {
+                const action = fileId ? "add to changeset or get version" : "upload";
+                const message = error instanceof Error ? error.message : String(error);
+                lib_core.error(`Processing failed for "${relativePath}" during ${action}: ${message}`);
+                throw error;
+            }
+        })));
+        // Separate successes from failures
+        const uploadedFileRefs = [];
+        let processingFailedCount = 0;
+        for (const result of results) {
+            if (result.status === "fulfilled") {
+                uploadedFileRefs.push(result.value);
+            }
+            else {
                 processingFailedCount++;
-                const action = fileId ? 'add to changeset or get version' : 'upload';
-                // Log error but continue processing other files
-                lib_core.error(`Processing failed for "${relativePath}" during ${action}: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
         lib_core.info(`Finished processing. Succeeded: ${uploadedFileRefs.length}, Failed: ${processingFailedCount}.`);
