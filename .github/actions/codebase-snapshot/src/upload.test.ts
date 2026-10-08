@@ -24,6 +24,7 @@ const inputs: CodebaseSnapshotInputs = {
 	excludePatterns: '',
 	archiveType: 'zip',
 	largeFileUploadMode: 'signed',
+	signedUploadTemplateId: '',
 };
 let directory: string;
 let smallFile: string;
@@ -54,8 +55,8 @@ beforeEach(() => {
 });
 afterEach(() => { fetchMock.mockRestore(); });
 
-test('the exact 30 MiB boundary stays direct with the explicit system', async () => {
-	await expect(uploadSnapshotFile(inputs, smallFile, 'snapshot.zip')).resolves.toBe('direct-file');
+test.each(['', 'file-template'])('the exact 30 MiB boundary stays direct with the explicit system and template %s', async signedUploadTemplateId => {
+	await expect(uploadSnapshotFile({ ...inputs, signedUploadTemplateId }, smallFile, 'snapshot.zip')).resolves.toBe('direct-file');
 	expect(uploadSealFile).toHaveBeenCalledWith(inputs.sealApiBaseUrl, token, smallFile, 'snapshot.zip', inputs.sealFileTypeTitle, 'engineering');
 	expect(fetchMock).not.toHaveBeenCalled();
 });
@@ -114,7 +115,20 @@ test('streams >30 MiB using the old three-step contract, checksum and a separate
 	expect(uploadSealFile).not.toHaveBeenCalled();
 });
 
-test.each([401, 403, 404, 500])('prepare HTTP %s stops with no fallback or leaked response', async (status) => {
+test('uses an explicit file template for the newer signed upload API', async () => {
+	fetchMock.mockResolvedValueOnce(json(prepared()))
+		.mockResolvedValueOnce(new Response(null, { status: 200 }))
+		.mockResolvedValueOnce(json({ id: 'new-file-entity' }));
+	await expect(uploadSnapshotFile({ ...inputs, signedUploadTemplateId: 'file-template' }, largeFile, 'snapshot.zip')).resolves.toBe('new-file-entity');
+	expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+		filename: 'snapshot.zip', contentType: 'application/octet-stream',
+		templateId: 'file-template', system: 'engineering',
+	});
+	expect(fetchMock).toHaveBeenCalledTimes(3);
+	expect(uploadSealFile).not.toHaveBeenCalled();
+});
+
+test.each([401, 403, 404, 422, 500])('prepare HTTP %s stops with no fallback or leaked response', async (status) => {
 	fetchMock.mockResolvedValueOnce(json({ message: `${token} ${uploadUrl} ${uploadToken}` }, status));
 	await expect(uploadSnapshotFile(inputs, largeFile, 'snapshot.zip')).rejects.toThrow(`Prepare upload failed (HTTP ${status}).`);
 	expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -159,7 +173,12 @@ describe('workflow inputs', () => {
 	};
 	test('defaults to direct and does not require a system', () => {
 		jest.mocked(core.getInput).mockImplementation(name => inputValues[name] || '');
-		expect(getCodebaseSnapshotInputs()).toMatchObject({ largeFileUploadMode: 'direct', sealSystem: '' });
+		expect(getCodebaseSnapshotInputs()).toMatchObject({ largeFileUploadMode: 'direct', sealSystem: '', signedUploadTemplateId: '' });
+	});
+
+	test('reads the signed upload template separately from the change control template', () => {
+		jest.mocked(core.getInput).mockImplementation(name => name === 'signed_upload_template_id' ? 'file-template' : inputValues[name] || '');
+		expect(getCodebaseSnapshotInputs()).toMatchObject({ sealTemplateId: 'template', signedUploadTemplateId: 'file-template' });
 	});
 	test('rejects signed mode without a system', () => {
 		jest.mocked(core.getInput).mockImplementation(name => name === 'large_file_upload_mode' ? 'signed' : inputValues[name] || '');

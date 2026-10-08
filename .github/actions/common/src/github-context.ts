@@ -16,6 +16,7 @@ export interface CodebaseSnapshotInputs extends CommonInputs {
 	excludePatterns: string; // Optional, space-separated
 	archiveType: 'zip' | 'tar'; // With default
 	largeFileUploadMode: 'direct' | 'signed';
+	signedUploadTemplateId: string;
 }
 
 /** Specific inputs for the Upload Artifacts action */
@@ -62,6 +63,7 @@ export function getCodebaseSnapshotInputs(): CodebaseSnapshotInputs {
 		excludePatterns: core.getInput('exclude_patterns', { required: false }),
 		archiveType: core.getInput('archive_type', { required: false }) || 'zip', // Default from action.yml
 		largeFileUploadMode: core.getInput('large_file_upload_mode') || 'direct',
+		signedUploadTemplateId: core.getInput('signed_upload_template_id'),
 	};
 
 	if (inputs.archiveType !== 'zip' && inputs.archiveType !== 'tar') {

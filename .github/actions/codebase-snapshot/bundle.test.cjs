@@ -44,7 +44,7 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString());
 }
 
-async function scenario({ mode = '', large = false, archive = 'zip', failure = '', artifacts = false }) {
+async function scenario({ mode = '', large = false, archive = 'zip', failure = '', artifacts = false, templateId = '' }) {
   const calls = [];
   const serverErrors = [];
   let uploaded = false;
@@ -96,7 +96,8 @@ async function scenario({ mode = '', large = false, archive = 'zip', failure = '
       if (route === '/api/v3/files/prepare-upload') {
         expect(await readJson(req)).toEqual({
           filename: expect.stringMatching(archive === 'tar' ? /\.tar\.gz$/ : /\.zip$/),
-          contentType: 'application/octet-stream', typeTitle: 'GitHub Artifacts', system: 'engineering',
+          contentType: 'application/octet-stream', system: 'engineering',
+          ...(templateId ? { templateId } : { typeTitle: 'GitHub Artifacts' }),
         });
         if (failure === 'prepare') return json({ message: 'Route unavailable' }, 404);
         return json({ method: 'PUT', uploadUrl: `${baseUrl}/storage/upload?signature=synthetic`, uploadToken,
@@ -140,6 +141,7 @@ async function scenario({ mode = '', large = false, archive = 'zip', failure = '
     INPUT_SEAL_SYSTEM: mode === 'signed' ? 'engineering' : '', INPUT_LARGE_FILE_UPLOAD_MODE: mode,
     INPUT_ARCHIVE_TYPE: archive, INPUT_ARTIFACT_PATTERNS: path.join(workspace, '*'),
     INPUT_SEAL_FIELD_NAME: 'Code Snapshot',
+    INPUT_SIGNED_UPLOAD_TEMPLATE_ID: templateId,
   };
   try {
     const result = await new Promise(resolve => execFile(process.execPath, [bundle],
@@ -174,8 +176,11 @@ test.each([
   expect(result.calls.at(-1)).toBe(`PATCH /api/entities/${targetId}/fields/Code%20Snapshot`);
 }, 120000);
 
-test.each(['zip', 'tar'])('large %s snapshot completes, joins the changeset and replaces the reference', async archive => {
-  const result = await scenario({ mode: 'signed', large: true, archive });
+test.each([
+  { archive: 'zip', templateId: '' }, { archive: 'tar', templateId: '' },
+  { archive: 'zip', templateId: 'file-template' }, { archive: 'tar', templateId: 'file-template' },
+])('large $archive snapshot with template "$templateId" completes, joins the changeset and replaces the reference', async ({ archive, templateId }) => {
+  const result = await scenario({ mode: 'signed', large: true, archive, templateId });
   expect(result.code).toBe(0);
   expect(result.calls.slice(3)).toEqual([
     'POST /api/v3/files/prepare-upload', 'PUT /storage/upload', 'POST /api/v3/files/complete-upload',

@@ -39898,6 +39898,7 @@ function getCodebaseSnapshotInputs() {
         excludePatterns: core.getInput('exclude_patterns', { required: false }),
         archiveType: core.getInput('archive_type', { required: false }) || 'zip', // Default from action.yml
         largeFileUploadMode: core.getInput('large_file_upload_mode') || 'direct',
+        signedUploadTemplateId: core.getInput('signed_upload_template_id'),
     };
     if (inputs.archiveType !== 'zip' && inputs.archiveType !== 'tar') {
         throw new Error(`Unsupported archive_type: ${inputs.archiveType}. Must be 'zip' or 'tar'.`);

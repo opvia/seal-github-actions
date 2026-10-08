@@ -75160,6 +75160,7 @@ function getCodebaseSnapshotInputs() {
         excludePatterns: lib_core.getInput('exclude_patterns', { required: false }),
         archiveType: lib_core.getInput('archive_type', { required: false }) || 'zip', // Default from action.yml
         largeFileUploadMode: lib_core.getInput('large_file_upload_mode') || 'direct',
+        signedUploadTemplateId: lib_core.getInput('signed_upload_template_id'),
     };
     if (inputs.archiveType !== 'zip' && inputs.archiveType !== 'tar') {
         throw new Error(`Unsupported archive_type: ${inputs.archiveType}. Must be 'zip' or 'tar'.`);
@@ -80952,7 +80953,9 @@ async function uploadSignedFile(inputs, filePath, filename, fileSize) {
         body: JSON.stringify({
             filename,
             contentType: CONTENT_TYPE,
-            typeTitle: inputs.sealFileTypeTitle,
+            ...(inputs.signedUploadTemplateId
+                ? { templateId: inputs.signedUploadTemplateId }
+                : { typeTitle: inputs.sealFileTypeTitle }),
             system: inputs.sealSystem,
         }),
     }, 'Prepare upload'), 'Prepare upload');

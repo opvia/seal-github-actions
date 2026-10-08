@@ -19,6 +19,9 @@ inputs:
     description: 'direct keeps legacy uploads. signed uses signed uploads above 30 MiB and requires seal_system and a deployment supporting the v3 prepare-upload and complete-upload endpoints.'
     required: false
     default: 'direct'
+  signed_upload_template_id:
+    description: 'File template ID for signed uploads on newer deployments. Leave empty on older deployments that use seal_file_type_title. Does not affect direct uploads.'
+    required: false
   seal_snapshot_field_name:
      description: 'Name of the reference field in the Seal entity to link the snapshot'
      required: false

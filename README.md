@@ -27,6 +27,7 @@ This action captures a snapshot of the repository's codebase at the time a pull 
 *   `seal_template_id` (required): Seal Template ID for the target change control entity.
 *   `seal_system` (optional): Seal system slug for the target change control entity. Leave unset to search all systems visible to the API token.
 *   `large_file_upload_mode` (optional, default: `direct`): Set to `signed` to upload archives larger than 30 MiB through signed storage uploads. This requires `seal_system` and a deployment supporting `/api/v3/files/prepare-upload` and `/api/v3/files/complete-upload`. In signed mode, `seal_system` selects the system for both the target entity lookup and all snapshot uploads, including smaller direct uploads. The default retains legacy upload behavior.
+*   `signed_upload_template_id` (optional): File template ID for deployments whose signed-upload API uses `templateId`. Leave unset on older deployments that use `typeTitle`; those keep using `seal_file_type_title`. This setting only affects signed uploads above 30 MiB.
 *   `seal_snapshot_field_name` (optional, default: `Code Snapshot`): Name of the reference field in the Seal entity to link the snapshot.
 *   `seal_file_type_title` (optional, default: `GitHub Artifacts`): Title for the uploaded file type in Seal.
 *   `exclude_patterns` (optional): Space-separated glob patterns to exclude from the archive (e.g., `.git/* node_modules/*`).
@@ -42,6 +43,8 @@ with:
 ```
 
 Choose the system containing your target change control and file type. Archives up to and including 30 MiB still use the direct endpoint with CRC32C validation. Larger archives stream to the signed storage URL with a `Content-MD5` checksum, then complete the upload in Seal before joining the changeset and linking the new file entity. A failed signed upload fails the action without falling back to the size-limited endpoint. This option applies only to Codebase Snapshot; Upload Artifacts keeps its existing behavior.
+
+Check your deployment's API docs for the upload target: older releases accept `typeTitle`; newer releases accept `templateId`. For the newer API, also set `signed_upload_template_id` to a File template. This is separate from `seal_template_id`, which identifies the target change control template. Do not set it on a release that only supports `typeTitle`.
 
 Pin the action to a reviewed commit or version when adopting this option. Removing `large_file_upload_mode` restores the legacy upload flow; archives above its limit will fail again. No deployment upgrade is needed when the two signed-upload endpoints are already supported.
 

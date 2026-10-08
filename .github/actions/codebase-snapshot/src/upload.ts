@@ -60,7 +60,9 @@ async function uploadSignedFile(
 		body: JSON.stringify({
 			filename,
 			contentType: CONTENT_TYPE,
-			typeTitle: inputs.sealFileTypeTitle,
+			...(inputs.signedUploadTemplateId
+				? { templateId: inputs.signedUploadTemplateId }
+				: { typeTitle: inputs.sealFileTypeTitle }),
 			system: inputs.sealSystem,
 		}),
 	}, 'Prepare upload'), 'Prepare upload');
