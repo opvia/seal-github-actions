@@ -26,10 +26,24 @@ This action captures a snapshot of the repository's codebase at the time a pull 
 *   `seal_api_base_url` (required): Seal API Base URL (e.g., `https://us.backend.seal.run/api/`).
 *   `seal_template_id` (required): Seal Template ID for the target change control entity.
 *   `seal_system` (optional): Seal system slug for the target change control entity. Leave unset to search all systems visible to the API token.
+*   `large_file_upload_mode` (optional, default: `direct`): Set to `signed` to upload archives larger than 30 MiB through signed storage uploads. This requires `seal_system` and a deployment supporting `/api/v3/files/prepare-upload` and `/api/v3/files/complete-upload`. In signed mode, `seal_system` selects the system for both the target entity lookup and all snapshot uploads, including smaller direct uploads. The default retains legacy upload behavior.
 *   `seal_snapshot_field_name` (optional, default: `Code Snapshot`): Name of the reference field in the Seal entity to link the snapshot.
 *   `seal_file_type_title` (optional, default: `GitHub Artifacts`): Title for the uploaded file type in Seal.
 *   `exclude_patterns` (optional): Space-separated glob patterns to exclude from the archive (e.g., `.git/* node_modules/*`).
-*   `archive_type` (optional, default: `zip`): The type of archive to create (supported: `zip`, `tar.gz`).
+*   `archive_type` (optional, default: `zip`): The type of archive to create (supported: `zip`, `tar`; `tar` produces a `.tar.gz` file).
+
+**Large snapshots:** After checking that your deployment supports both signed-upload endpoints, opt in with:
+
+```yaml
+with:
+  # Keep your existing API token, base URL, template and other inputs.
+  large_file_upload_mode: 'signed'
+  seal_system: 'YOUR_SYSTEM_SLUG'
+```
+
+Choose the system containing your target change control and file type. Archives up to and including 30 MiB still use the direct endpoint with CRC32C validation. Larger archives stream to the signed storage URL with a `Content-MD5` checksum, then complete the upload in Seal before joining the changeset and linking the new file entity. A failed signed upload fails the action without falling back to the size-limited endpoint. This option applies only to Codebase Snapshot; Upload Artifacts keeps its existing behavior.
+
+Pin the action to a reviewed commit or version when adopting this option. Removing `large_file_upload_mode` restores the legacy upload flow; archives above its limit will fail again. No deployment upgrade is needed when the two signed-upload endpoints are already supported.
 
 ### 2. Upload Artifacts Action (`.github/actions/upload-artifacts`)
 
@@ -96,7 +110,7 @@ jobs:
           seal_snapshot_field_name: 'Code Snapshot' # Optional
           seal_file_type_title: 'GitHub-CodeSnapshot' # Optional
           exclude_patterns: '.git/* node_modules/* build/* dist/*' # Optional
-          archive_type: 'zip' # Optional (zip or tar.gz)
+          archive_type: 'zip' # Optional (zip or tar)
 ```
 
 **2. Using Repository Path:**
@@ -211,3 +225,15 @@ jobs:
           # seal_field_name: 'Release Artifacts'
           # seal_file_type_title: 'CI-Artifacts'
 ```
+
+## Local validation
+
+Use Node.js 20 or newer and OpenSSL, then run:
+
+```sh
+cd .github/actions
+npm ci
+npm run all
+```
+
+The tests use synthetic files and temporary HTTPS servers on loopback. They exercise the built action bundles, so rebuild before testing source changes. No Seal account or storage credentials are needed.

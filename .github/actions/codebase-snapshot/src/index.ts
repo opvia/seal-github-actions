@@ -14,12 +14,12 @@ import {
 	findSealEntity,
 	getSealFileVersion,
 	linkFilesToEntityField,
-	uploadSealFile,
 	getSealEntityChangeSetIndex,
 	addEntityToChangeSet,
 	type SealFileReference,
 	archiveEntities,
 } from '../../common/src/seal-api.js'; // Adjust paths
+import { uploadSnapshotFile } from './upload.js';
 
 // Define types for archiver errors
 interface ArchiverError extends Error {
@@ -147,7 +147,8 @@ async function run(): Promise<void> {
 		return;
 	}
 	core.info(`Running for PR #${prContext.prNumber} in workspace ${prContext.workspace}`);
-	core.debug(`Inputs: ${JSON.stringify(inputs)}`);
+	const { sealApiToken, ...loggedInputs } = inputs;
+	core.debug(`Inputs: ${JSON.stringify(loggedInputs)}`);
 	core.endGroup();
 
 	let snapshotDir: string | null = null;
@@ -184,13 +185,7 @@ async function run(): Promise<void> {
 		// --- Step 3: Upload Codebase Archive ---
 		core.startGroup('Uploading Codebase Snapshot');
 		const sealFilename = path.basename(archivePath); // Use the generated archive name
-		const fileId = await uploadSealFile(
-			inputs.sealApiBaseUrl,
-			inputs.sealApiToken,
-			archivePath, // Pass absolute path to archive
-			sealFilename,
-			inputs.sealFileTypeTitle,
-		);
+		const fileId = await uploadSnapshotFile(inputs, archivePath, sealFilename);
 		core.endGroup();
 
 		// --- Step 3b: Add Snapshot to Changeset ---

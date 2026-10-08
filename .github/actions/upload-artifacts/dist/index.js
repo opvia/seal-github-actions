@@ -39897,10 +39897,18 @@ function getCodebaseSnapshotInputs() {
         sealFileTypeTitle: core.getInput('seal_file_type_title', { required: false }) || 'GitHub Artifacts', // Default from action.yml
         excludePatterns: core.getInput('exclude_patterns', { required: false }),
         archiveType: core.getInput('archive_type', { required: false }) || 'zip', // Default from action.yml
+        largeFileUploadMode: core.getInput('large_file_upload_mode') || 'direct',
     };
     if (inputs.archiveType !== 'zip' && inputs.archiveType !== 'tar') {
         throw new Error(`Unsupported archive_type: ${inputs.archiveType}. Must be 'zip' or 'tar'.`);
     }
+    if (inputs.largeFileUploadMode !== 'direct' && inputs.largeFileUploadMode !== 'signed') {
+        throw new Error("large_file_upload_mode must be 'direct' or 'signed'.");
+    }
+    if (inputs.largeFileUploadMode === 'signed' && !inputs.sealSystem) {
+        throw new Error('seal_system is required when large_file_upload_mode is signed.');
+    }
+    core.setSecret(inputs.sealApiToken);
     return inputs; // Cast after validation
 }
 /**
@@ -45403,11 +45411,11 @@ async function addEntityToChangeSet(apiUrl, apiToken, entityIdToAdd, changeSetIn
 }
 /**
  * Uploads a file to Seal, creating a new file entity.
- * Uses fetch with HTTP/2 support to handle large file uploads without size limits.
+ * Uses the direct endpoint, which accepts files up to 30 MiB.
  * @returns The ID of the newly created Seal file entity.
  * @throws If upload fails or API error occurs.
  */
-async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileTypeTitle) {
+async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileTypeTitle, system) {
     const functionName = 'uploadSealFile';
     const baseFilename = external_node_path_default().basename(filePath);
     lib_core.info(`[${functionName}] Uploading file "${baseFilename}" as "${sealFilename}" with type "${fileTypeTitle}"`);
@@ -45420,6 +45428,8 @@ async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileType
         typeTitle: fileTypeTitle,
         crc32cHash,
     });
+    if (system)
+        params.set('system', system);
     const url = `${baseUrl}files?${params.toString()}`;
     const stats = external_node_fs_default().statSync(filePath);
     const fileSizeInBytes = stats.size;
