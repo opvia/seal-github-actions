@@ -517,7 +517,7 @@ export async function addEntityToChangeSet(
 
 /**
  * Uploads a file to Seal, creating a new file entity.
- * Uses fetch with HTTP/2 support to handle large file uploads without size limits.
+ * Uses the direct endpoint, which accepts files up to 30 MiB.
  * @returns The ID of the newly created Seal file entity.
  * @throws If upload fails or API error occurs.
  */
@@ -527,6 +527,7 @@ export async function uploadSealFile(
 	filePath: string,
 	sealFilename: string,
 	fileTypeTitle: string,
+	system?: string,
 ): Promise<string> {
 	const functionName = 'uploadSealFile';
 	const baseFilename = path.basename(filePath);
@@ -544,6 +545,7 @@ export async function uploadSealFile(
 		typeTitle: fileTypeTitle,
 		crc32cHash,
 	});
+	if (system) params.set('system', system);
 	const url = `${baseUrl}files?${params.toString()}`;
 
 	const stats = fs.statSync(filePath);

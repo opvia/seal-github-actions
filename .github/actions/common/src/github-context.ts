@@ -15,6 +15,8 @@ export interface CodebaseSnapshotInputs extends CommonInputs {
 	snapshotFieldName: string;
 	excludePatterns: string; // Optional, space-separated
 	archiveType: 'zip' | 'tar'; // With default
+	largeFileUploadMode: 'direct' | 'signed';
+	signedUploadTemplateId: string;
 }
 
 /** Specific inputs for the Upload Artifacts action */
@@ -60,11 +62,20 @@ export function getCodebaseSnapshotInputs(): CodebaseSnapshotInputs {
 		sealFileTypeTitle: core.getInput('seal_file_type_title', { required: false }) || 'GitHub Artifacts', // Default from action.yml
 		excludePatterns: core.getInput('exclude_patterns', { required: false }),
 		archiveType: core.getInput('archive_type', { required: false }) || 'zip', // Default from action.yml
+		largeFileUploadMode: core.getInput('large_file_upload_mode') || 'direct',
+		signedUploadTemplateId: core.getInput('signed_upload_template_id'),
 	};
 
 	if (inputs.archiveType !== 'zip' && inputs.archiveType !== 'tar') {
 		throw new Error(`Unsupported archive_type: ${inputs.archiveType}. Must be 'zip' or 'tar'.`);
 	}
+	if (inputs.largeFileUploadMode !== 'direct' && inputs.largeFileUploadMode !== 'signed') {
+		throw new Error("large_file_upload_mode must be 'direct' or 'signed'.");
+	}
+	if (inputs.largeFileUploadMode === 'signed' && !inputs.sealSystem) {
+		throw new Error('seal_system is required when large_file_upload_mode is signed.');
+	}
+	core.setSecret(inputs.sealApiToken);
 
 	return inputs as CodebaseSnapshotInputs; // Cast after validation
 }

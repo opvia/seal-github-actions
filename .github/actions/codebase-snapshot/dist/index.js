@@ -75159,10 +75159,19 @@ function getCodebaseSnapshotInputs() {
         sealFileTypeTitle: lib_core.getInput('seal_file_type_title', { required: false }) || 'GitHub Artifacts', // Default from action.yml
         excludePatterns: lib_core.getInput('exclude_patterns', { required: false }),
         archiveType: lib_core.getInput('archive_type', { required: false }) || 'zip', // Default from action.yml
+        largeFileUploadMode: lib_core.getInput('large_file_upload_mode') || 'direct',
+        signedUploadTemplateId: lib_core.getInput('signed_upload_template_id'),
     };
     if (inputs.archiveType !== 'zip' && inputs.archiveType !== 'tar') {
         throw new Error(`Unsupported archive_type: ${inputs.archiveType}. Must be 'zip' or 'tar'.`);
     }
+    if (inputs.largeFileUploadMode !== 'direct' && inputs.largeFileUploadMode !== 'signed') {
+        throw new Error("large_file_upload_mode must be 'direct' or 'signed'.");
+    }
+    if (inputs.largeFileUploadMode === 'signed' && !inputs.sealSystem) {
+        throw new Error('seal_system is required when large_file_upload_mode is signed.');
+    }
+    lib_core.setSecret(inputs.sealApiToken);
     return inputs; // Cast after validation
 }
 /**
@@ -80662,11 +80671,11 @@ async function addEntityToChangeSet(apiUrl, apiToken, entityIdToAdd, changeSetIn
 }
 /**
  * Uploads a file to Seal, creating a new file entity.
- * Uses fetch with HTTP/2 support to handle large file uploads without size limits.
+ * Uses the direct endpoint, which accepts files up to 30 MiB.
  * @returns The ID of the newly created Seal file entity.
  * @throws If upload fails or API error occurs.
  */
-async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileTypeTitle) {
+async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileTypeTitle, system) {
     const functionName = 'uploadSealFile';
     const baseFilename = external_node_path_default().basename(filePath);
     lib_core.info(`[${functionName}] Uploading file "${baseFilename}" as "${sealFilename}" with type "${fileTypeTitle}"`);
@@ -80679,6 +80688,8 @@ async function uploadSealFile(apiUrl, apiToken, filePath, sealFilename, fileType
         typeTitle: fileTypeTitle,
         crc32cHash,
     });
+    if (system)
+        params.set('system', system);
     const url = `${baseUrl}files?${params.toString()}`;
     const stats = external_node_fs_default().statSync(filePath);
     const fileSizeInBytes = stats.size;
@@ -80885,6 +80896,158 @@ async function archiveEntities(apiUrl, apiToken, fileRefs) {
     return;
 }
 
+// EXTERNAL MODULE: external "node:crypto"
+var external_node_crypto_ = __nccwpck_require__(7598);
+;// CONCATENATED MODULE: ./codebase-snapshot/src/upload.ts
+
+
+
+
+
+const DIRECT_UPLOAD_LIMIT = 30 * 1024 * 1024;
+const CONTENT_TYPE = 'application/octet-stream';
+function isRecord(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+// Do not expose error bodies, URLs or fetch error causes: these can contain
+// signed credentials. A failed step is never retried through the direct API.
+async function request(url, init, step) {
+    let response;
+    try {
+        response = await fetch(url, { ...init, redirect: 'error' });
+    }
+    catch {
+        throw new Error(`${step} failed: network or redirect error.`);
+    }
+    if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`${step} failed (HTTP ${response.status}).`);
+    }
+    return response;
+}
+async function readJson(response, step) {
+    try {
+        return await response.json();
+    }
+    catch {
+        throw new Error(`${step} returned invalid JSON.`);
+    }
+}
+async function uploadSignedFile(inputs, filePath, filename, fileSize) {
+    // Hash before preparing the URL so hashing does not consume its lifetime.
+    // Content-MD5 is validated by the GCS XML PUT API and does not require a
+    // change to Seal's existing signed URL contract.
+    const hash = (0,external_node_crypto_.createHash)('md5');
+    for await (const chunk of (0,external_node_fs_.createReadStream)(filePath))
+        hash.update(chunk);
+    const contentMd5 = hash.digest('base64');
+    const baseUrl = inputs.sealApiBaseUrl.replace(/\/$/, '');
+    const apiHeaders = {
+        Authorization: `Bearer ${inputs.sealApiToken.trim()}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+    };
+    const prepared = await readJson(await request(`${baseUrl}/v3/files/prepare-upload`, {
+        method: 'POST',
+        headers: apiHeaders,
+        body: JSON.stringify({
+            filename,
+            contentType: CONTENT_TYPE,
+            ...(inputs.signedUploadTemplateId
+                ? { templateId: inputs.signedUploadTemplateId }
+                : { typeTitle: inputs.sealFileTypeTitle }),
+            system: inputs.sealSystem,
+        }),
+    }, 'Prepare upload'), 'Prepare upload');
+    if (isRecord(prepared)) {
+        if (typeof prepared.uploadUrl === 'string')
+            lib_core.setSecret(prepared.uploadUrl);
+        if (typeof prepared.uploadToken === 'string')
+            lib_core.setSecret(prepared.uploadToken);
+    }
+    if (!isRecord(prepared) || prepared.method !== 'PUT'
+        || typeof prepared.uploadUrl !== 'string'
+        || typeof prepared.uploadToken !== 'string' || !prepared.uploadToken
+        || typeof prepared.expiresAt !== 'string'
+        || !Number.isFinite(Date.parse(prepared.expiresAt))
+        || !isRecord(prepared.headers)) {
+        throw new Error('Prepare upload returned an invalid upload target.');
+    }
+    let uploadUrl;
+    try {
+        uploadUrl = new URL(prepared.uploadUrl);
+    }
+    catch {
+        throw new Error('Prepare upload returned an invalid upload URL.');
+    }
+    if (uploadUrl.protocol !== 'https:' || uploadUrl.username || uploadUrl.password) {
+        throw new Error('Prepare upload must return an HTTPS upload URL without user credentials.');
+    }
+    if (Date.parse(prepared.expiresAt) <= Date.now()) {
+        throw new Error('Prepared upload has expired; run the action again.');
+    }
+    const storageHeaders = new Headers();
+    for (const [name, value] of Object.entries(prepared.headers)) {
+        if (typeof value !== 'string' || name.toLowerCase() === 'authorization') {
+            throw new Error('Prepare upload returned invalid storage headers.');
+        }
+        try {
+            storageHeaders.set(name, value);
+        }
+        catch {
+            throw new Error('Prepare upload returned invalid storage headers.');
+        }
+    }
+    storageHeaders.set('Content-Length', String(fileSize));
+    storageHeaders.set('Content-MD5', contentMd5);
+    lib_core.info(`Uploading snapshot using signed storage upload (${fileSize} bytes).`);
+    const stream = (0,external_node_fs_.createReadStream)(filePath);
+    try {
+        const chunks = stream[Symbol.asyncIterator]();
+        const body = new ReadableStream({
+            async pull(controller) {
+                const { done, value } = await chunks.next();
+                if (done)
+                    controller.close();
+                else
+                    controller.enqueue(value);
+            },
+            cancel() { stream.destroy(); },
+        });
+        const init = {
+            method: 'PUT',
+            headers: storageHeaders,
+            body,
+            duplex: 'half',
+        };
+        const response = await request(uploadUrl.href, init, 'Storage upload');
+        await response.body?.cancel();
+    }
+    finally {
+        stream.destroy();
+    }
+    const completed = await readJson(await request(`${baseUrl}/v3/files/complete-upload`, {
+        method: 'POST',
+        headers: apiHeaders,
+        body: JSON.stringify({ uploadToken: prepared.uploadToken }),
+    }, 'Complete upload'), 'Complete upload');
+    if (!isRecord(completed) || typeof completed.id !== 'string' || !completed.id) {
+        throw new Error('Complete upload returned no file entity ID.');
+    }
+    return completed.id;
+}
+async function uploadSnapshotFile(inputs, filePath, filename) {
+    const signed = inputs.largeFileUploadMode === 'signed';
+    if (signed && !inputs.sealSystem) {
+        throw new Error('seal_system is required when large_file_upload_mode is signed.');
+    }
+    const { size } = await (0,promises_.stat)(filePath);
+    if (signed && size > DIRECT_UPLOAD_LIMIT) {
+        return uploadSignedFile(inputs, filePath, filename, size);
+    }
+    return uploadSealFile(inputs.sealApiBaseUrl, inputs.sealApiToken, filePath, filename, inputs.sealFileTypeTitle, signed ? inputs.sealSystem : undefined);
+}
+
 ;// CONCATENATED MODULE: ./codebase-snapshot/src/index.ts
 
 
@@ -80894,6 +81057,7 @@ async function archiveEntities(apiUrl, apiToken, fileRefs) {
 
  // Adjust paths if structure differs
  // Adjust paths
+
 /**
  * Gets the archive format configuration based on the specified type.
  * @param archiveType The type of archive to create
@@ -80992,7 +81156,8 @@ async function run() {
         return;
     }
     lib_core.info(`Running for PR #${prContext.prNumber} in workspace ${prContext.workspace}`);
-    lib_core.debug(`Inputs: ${JSON.stringify(inputs)}`);
+    const { sealApiToken, ...loggedInputs } = inputs;
+    lib_core.debug(`Inputs: ${JSON.stringify(loggedInputs)}`);
     lib_core.endGroup();
     let snapshotDir = null;
     let archivePath = null;
@@ -81013,8 +81178,7 @@ async function run() {
         // --- Step 3: Upload Codebase Archive ---
         lib_core.startGroup('Uploading Codebase Snapshot');
         const sealFilename = external_node_path_default().basename(archivePath); // Use the generated archive name
-        const fileId = await uploadSealFile(inputs.sealApiBaseUrl, inputs.sealApiToken, archivePath, // Pass absolute path to archive
-        sealFilename, inputs.sealFileTypeTitle);
+        const fileId = await uploadSnapshotFile(inputs, archivePath, sealFilename);
         lib_core.endGroup();
         // --- Step 3b: Add Snapshot to Changeset ---
         lib_core.startGroup('Adding Snapshot to Changeset');
